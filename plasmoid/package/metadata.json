@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Category": "System Information",
+        "Description": "Zeigt an, ob auf dem TrueNAS alles in Ordnung ist (nur lesend)",
+        "Description[de]": "Zeigt an, ob auf dem TrueNAS alles in Ordnung ist (nur lesend)",
+        "Icon": "network-server",
+        "Id": "local.truenasstatus",
+        "Name": "TrueNAS-Status",
+        "Name[de]": "TrueNAS-Status",
+        "Version": "0.1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
