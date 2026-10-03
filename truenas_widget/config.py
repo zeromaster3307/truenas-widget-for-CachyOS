@@ -158,6 +158,9 @@ def from_dict(data: dict, *, require_fingerprint: bool = True) -> Config:
 
     fp_raw = _get(tn, "fingerprint_sha256", str, default="")
     fingerprint = normalize_fingerprint(fp_raw)
+    if fingerprint == "0" * 64:
+        # Platzhalter aus config.example.toml gilt als "nicht eingetragen".
+        fingerprint = ""
     if fingerprint and not _HEX64.match(fingerprint):
         raise ConfigError(
             "'fingerprint_sha256' ist ungültig. Erwartet werden 64 Hex-Zeichen "
