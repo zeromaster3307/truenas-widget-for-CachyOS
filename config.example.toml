@@ -1,0 +1,57 @@
+# Beispiel-Konfiguration für das TrueNAS-Status-Widget
+# =====================================================
+#
+# So benutzen:
+#   1. Diese Datei kopieren nach ~/.config/truenas-widget/config.toml
+#      (install.sh macht das automatisch, falls dort noch keine liegt).
+#   2. Die Werte unten an Ihr System anpassen.
+#   3. Die echte Datei NICHT ins Git-Repo legen.
+#
+# Alle Werte hier sind PLATZHALTER.
+
+[truenas]
+# Anzeigename im Widget (frei wählbar)
+name = "Mein TrueNAS"
+
+# Adresse des TrueNAS im LAN. NUR die Adresse, ohne "http://".
+# "http://" oder "ws://" werden abgelehnt: TrueNAS widerruft einen API-Key,
+# wenn er unverschlüsselt gesendet wird.
+host = "192.168.1.20"
+
+# HTTPS-Port der TrueNAS-Weboberfläche
+port = 5443
+
+# Benutzer auf dem TrueNAS, dem der API-Key gehört (schreibgeschützte Rolle)
+username = "widget-leser"
+
+# SHA-256-Fingerabdruck des TrueNAS-Zertifikats.
+# Ermitteln mit:  ./diagnose.sh --nur-fingerabdruck
+# Nur nach eigener Prüfung übernehmen (siehe README, Abschnitt 4).
+# Platzhalter - so lange er nicht ersetzt ist, kommt keine Verbindung zustande:
+fingerprint_sha256 = "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
+
+# API-Version im Pfad wss://<host>:<port>/api/<api_version>
+# "v25.10.0" ist die Version, gegen die dieses Programm geschrieben wurde.
+api_version = "v25.10.0"
+
+[key]
+# Woher der API-Key kommt: "file" (Standard) oder "secret-tool" (KWallet/libsecret)
+source = "file"
+
+# Nur bei source = "file": Pfad zur Key-Datei (Rechte 600!)
+file = "~/.config/truenas-widget/api-key"
+
+# Nur bei source = "secret-tool": Suchmerkmale für "secret-tool lookup"
+secret_tool_attributes = { service = "truenas-widget", account = "api-key" }
+
+[checker]
+# Abstand zwischen zwei Prüfungen in Minuten.
+# Nach einer Änderung bitte ./install.sh erneut ausführen (stellt den Timer um).
+interval_minutes = 15
+
+# Wie lange auf TrueNAS gewartet wird (Sekunden)
+timeout_seconds = 20
+
+[notifications]
+# Desktop-Benachrichtigungen bei neuen Warnungen/Updates (true/false)
+enabled = true
