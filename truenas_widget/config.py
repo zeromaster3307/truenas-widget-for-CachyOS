@@ -41,6 +41,29 @@ _SECURE_SCHEMES = ("https://", "wss://")
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
+# Erlaubte Prüfintervalle in Minuten. Der systemd-Timer benutzt OnCalendar=
+# (nur damit wirkt Persistent=true, siehe systemd.timer(5)). Ein Kalender-
+# Ausdruck wie "*:00/15" ist nur dann gleichmässig, wenn das Intervall glatt
+# in eine Stunde (bzw. ab 60 Minuten glatt in einen Tag) passt.
+ALLOWED_INTERVALS = (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30,
+                     60, 120, 180, 240, 360, 480, 720, 1440)
+
+
+def oncalendar(minutes: int) -> str:
+    """systemd-OnCalendar-Ausdruck für das Intervall, z. B. 15 -> '*-*-* *:00/15:00'."""
+    if minutes not in ALLOWED_INTERVALS:
+        raise ConfigError(_interval_error(minutes))
+    if minutes < 60:
+        return f"*-*-* *:00/{minutes}:00"
+    if minutes < 1440:
+        return f"*-*-* 00/{minutes // 60}:00:00"
+    return "*-*-* 00:00:00"
+
+
+def _interval_error(minutes) -> str:
+    return (f"'interval_minutes' = {minutes} ist nicht möglich. Erlaubt sind: "
+            + ", ".join(str(m) for m in ALLOWED_INTERVALS) + " (Minuten).")
+
 
 def normalize_fingerprint(value: str) -> str:
     """Macht aus "AB:CD:..." bzw. "ab cd ..." einheitlich "abcd..." (64 Zeichen)."""
@@ -196,8 +219,8 @@ def from_dict(data: dict, *, require_fingerprint: bool = True) -> Config:
         raise ConfigError("[key] secret_tool_attributes muss Text-Paare enthalten.")
 
     interval = _get(chk, "interval_minutes", int, default=15)
-    if not 1 <= interval <= 1440:
-        raise ConfigError("'interval_minutes' muss zwischen 1 und 1440 liegen.")
+    if interval not in ALLOWED_INTERVALS:
+        raise ConfigError(_interval_error(interval))
     timeout = _get(chk, "timeout_seconds", float, default=20.0)
     if not 1 <= timeout <= 300:
         raise ConfigError("'timeout_seconds' muss zwischen 1 und 300 liegen.")
@@ -229,13 +252,22 @@ def load(path: Path | None = None, *, require_fingerprint: bool = True) -> Confi
 
 
 if __name__ == "__main__":
-    # Kleiner Helfer für install.sh: gibt das Prüf-Intervall in Minuten aus.
+    # Kleine Helfer für install.sh:
+    #   --print-interval    Prüfintervall in Minuten
+    #   --print-oncalendar  passender systemd-OnCalendar-Ausdruck
+    # Ist die Konfiguration (noch) fehlerhaft, gilt der Standard von 15 Minuten.
     import sys
 
-    if sys.argv[1:] == ["--print-interval"]:
+    def _interval() -> int:
         try:
-            print(load(require_fingerprint=False).interval_minutes)
-        except ConfigError:
-            print(15)
+            return load(require_fingerprint=False).interval_minutes
+        except ConfigError as exc:
+            print(f"Hinweis: {exc} -> verwende 15 Minuten.", file=sys.stderr)
+            return 15
+
+    if sys.argv[1:] == ["--print-interval"]:
+        print(_interval())
+    elif sys.argv[1:] == ["--print-oncalendar"]:
+        print(oncalendar(_interval()))
     else:
-        print("Aufruf: python3 -m truenas_widget.config --print-interval")
+        print("Aufruf: python3 -m truenas_widget.config --print-interval | --print-oncalendar")

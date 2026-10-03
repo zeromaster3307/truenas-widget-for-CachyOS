@@ -60,16 +60,19 @@ fi
 
 # --- 4. systemd-Timer ---
 INTERVAL=$(PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.config --print-interval)
+ONCALENDAR=$(PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.config --print-oncalendar)
 mkdir -p "$UNITDIR"
 sed -e "s|@APPDIR@|$APPDIR|g" -e "s|@PYTHON@|$PYTHON|g" \
     "$REPO/systemd/truenas-widget.service" > "$UNITDIR/truenas-widget.service"
-sed -e "s|@INTERVAL@|$INTERVAL|g" \
+sed -e "s|@ONCALENDAR@|$ONCALENDAR|g" \
     "$REPO/systemd/truenas-widget.timer" > "$UNITDIR/truenas-widget.timer"
 systemctl --user daemon-reload
-systemctl --user enable truenas-widget.timer >/dev/null 2>&1 || \
-    systemctl --user enable truenas-widget.timer
-# Neustart, damit ein geändertes Intervall sofort gilt
+# Timer dauerhaft einschalten UND sofort starten:
+systemctl --user enable --now truenas-widget.timer
+# War der Timer schon aktiv, übernimmt erst ein Neustart ein geändertes Intervall.
 systemctl --user restart truenas-widget.timer
+# Einmal sofort prüfen (im Hintergrund), damit das Widget gleich Daten hat.
+systemctl --user start --no-block truenas-widget.service
 say "[4/5] systemd-Timer aktiv (alle $INTERVAL Minuten)"
 
 # --- 5. Plasma-Widget ---

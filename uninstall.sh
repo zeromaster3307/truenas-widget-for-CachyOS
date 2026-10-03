@@ -15,6 +15,8 @@ STATEDIR="${XDG_STATE_HOME:-$HOME/.local/state}/truenas-widget"
 PLASMOID_ID="local.truenasstatus"
 
 systemctl --user disable --now truenas-widget.timer 2>/dev/null
+# Zeitstempel-Datei von Persistent=true entfernen (empfohlen in systemd.timer(5))
+systemctl --user clean --what=state truenas-widget.timer 2>/dev/null
 systemctl --user stop truenas-widget.service 2>/dev/null
 rm -f "$UNITDIR/truenas-widget.timer" "$UNITDIR/truenas-widget.service"
 systemctl --user daemon-reload 2>/dev/null
