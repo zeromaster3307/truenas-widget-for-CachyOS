@@ -1,0 +1,13 @@
+# systemd-User-Service: führt den Prüfer EINMAL aus (wird vom Timer gestartet).
+# Platzhalter @...@ werden von install.sh ersetzt.
+[Unit]
+Description=TrueNAS-Status abfragen (nur lesend)
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=@APPDIR@
+ExecStart=@PYTHON@ -m truenas_widget.checker
+# Kleine Schutzmassnahmen: keine Rechteausweitung, niedrige Priorität
+NoNewPrivileges=yes
+Nice=10
+TimeoutStartSec=120

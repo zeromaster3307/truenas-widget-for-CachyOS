@@ -1,0 +1,14 @@
+# systemd-User-Timer: startet den Prüfer regelmässig.
+# @INTERVAL@ wird von install.sh aus der Konfiguration (interval_minutes) gesetzt.
+[Unit]
+Description=TrueNAS-Status regelmässig prüfen
+
+[Timer]
+# 1 Minute nach dem Anmelden das erste Mal ...
+OnStartupSec=1min
+# ... danach im eingestellten Abstand
+OnUnitActiveSec=@INTERVAL@min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
