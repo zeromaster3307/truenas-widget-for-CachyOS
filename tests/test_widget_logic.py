@@ -163,23 +163,29 @@ class StartupCheckLogicTests(unittest.TestCase):
         r = js(f"checkOutcome({NOW}, {new}, null, false)",   # neue Daten -> fertig
                f"checkOutcome({NOW}, {old}, null, false)",   # noch nichts -> warten
                f"checkOutcome({NOW}, {old}, 0, false)",      # Dienst fertig, Datei noch alt -> warten
-               f"checkOutcome({NOW}, {old}, 75, false)",     # übersprungen -> warten
+               f"checkOutcome({NOW}, {old}, 75, false)",     # anderes Widget prüft gerade -> warten
                f"checkOutcome({NOW}, {old}, null, true)",    # Timeout -> fehlgeschlagen
                f"checkOutcome({NOW}, {old}, 5, false)",      # systemctl-Fehler -> fehlgeschlagen
                f"checkOutcome(0, null, null, true)",         # keine Datei + Timeout
-               f"checkOutcome(0, {new}, 0, false)")          # erste Datei überhaupt
-        self.assertEqual(r, ["done", "pending", "pending", "pending", "failed", "failed", "failed", "done"])
+               f"checkOutcome(0, {new}, 0, false)",          # erste Datei überhaupt
+               f"checkOutcome({NOW}, {old}, 76, false)",     # zu kurz nach letztem Start -> übersprungen
+               f"checkOutcome({NOW}, {new}, 76, false)")     # ... aber neue Daten sind da -> fertig
+        self.assertEqual(r, ["done", "pending", "pending", "pending", "failed", "failed", "failed", "done",
+                             "skipped", "done"])
 
     def test_anzeige_pruefe_und_fehlgeschlagen(self):
         r = js('headerText({text: "OK"}, true)', 'headerText({text: "OK"}, false)',
-               'linesWithCheckState([], true)', 'linesWithCheckState([], false)')
+               'linesWithCheckState([], true, "")', 'linesWithCheckState([], false, "")',
+               'linesWithCheckState([{kind: "app", text: "x", level: ""}], false, TOO_SOON_TEXT)')
         self.assertEqual(r[0], "Prüfe…")
         self.assertEqual(r[1], "OK")
         self.assertIn("Prüfung fehlgeschlagen", r[2][0]["text"])
         self.assertEqual(r[3], [])
+        self.assertIn("Bitte kurz warten", r[4][0]["text"])  # Hinweis oben ...
+        self.assertEqual(r[4][1]["text"], "x")               # ... bisheriger Inhalt bleibt
 
     def test_konstanten(self):
-        self.assertEqual(js("MIN_TRIGGER_SECONDS", "SKIPPED_EXIT_CODE"), [60, 75])
+        self.assertEqual(js("MIN_TRIGGER_SECONDS", "SKIPPED_EXIT_CODE", "TOO_SOON_EXIT_CODE"), [60, 75, 76])
 
 
 @unittest.skipUnless(shutil.which("node") and shutil.which("flock"), "Node.js oder flock fehlt")
@@ -226,7 +232,7 @@ class TriggerCommandTests(unittest.TestCase):
         self.fake_systemctl()
         self.assertEqual(self.run_trigger().returncode, 0)
         second = self.run_trigger()
-        self.assertEqual(second.returncode, 75)          # übersprungen
+        self.assertEqual(second.returncode, 76)          # zu kurz her -> übersprungen
         self.assertEqual(len(self.calls_list()), 1)
         # Zeitstempel künstlich 61 s zurückdatieren -> wieder erlaubt
         stamp = self.home / ".cache" / "truenas-widget" / "widget-trigger.stamp"
@@ -267,3 +273,22 @@ class TriggerCommandTests(unittest.TestCase):
         f.write_text("#!/bin/sh\nexit 5\n")  # z. B. Dienst nicht installiert
         f.chmod(0o755)
         self.assertEqual(self.run_trigger().returncode, 5)
+
+
+class ManualCheckQmlTests(unittest.TestCase):
+    """"Jetzt prüfen" im Rechtsklick-Menü (statische Prüfung der QML-Datei)."""
+
+    QML = (Path(__file__).parent.parent / "plasmoid" / "package" / "contents" / "ui" / "main.qml").read_text()
+
+    def test_menueeintrag_vorhanden(self):
+        self.assertIn("Plasmoid.contextualActions", self.QML)
+        self.assertIn('text: "Jetzt prüfen"', self.QML)
+        self.assertIn("onTriggered: root.startCheck(true)", self.QML)
+
+    def test_widget_startet_nur_den_einen_befehl(self):
+        # Ausser in Kommentaren darf "systemctl" nirgends direkt im QML stehen;
+        # gestartet wird ausschliesslich Logic.triggerCommand().
+        code = "\n".join(l for l in self.QML.splitlines() if not l.strip().startswith("//"))
+        self.assertNotIn("systemctl", code)
+        self.assertEqual(code.count("trigger.connectSource("), 1)
+        self.assertIn("trigger.connectSource(Logic.triggerCommand())", code)

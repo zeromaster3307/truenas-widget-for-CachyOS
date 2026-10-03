@@ -187,9 +187,11 @@ var MIN_TRIGGER_SECONDS = 60;
 // 120 s ab (TimeoutStartSec in truenas-widget.service), plus Reserve.
 var CHECK_TIMEOUT_SECONDS = 150;
 
-// Rückgabewert des Startbefehls, wenn er bewusst NICHTS gestartet hat
-// (letzter Start < 60 s her, oder ein anderes Widget startet gerade).
+// Rückgabewerte des Startbefehls, wenn er bewusst NICHTS gestartet hat:
+//   75 = ein anderes Widget hat gerade eine Prüfung laufen -> auf deren Ergebnis warten
+//   76 = der letzte Start ist keine 60 s her (und läuft nicht mehr) -> nichts zu warten
 var SKIPPED_EXIT_CODE = 75;
+var TOO_SOON_EXIT_CODE = 76;
 
 // true = status.json fehlt/ist unlesbar oder älter als das Prüfintervall.
 function needsCheck(st, nowMs) {
@@ -217,7 +219,7 @@ function triggerCommand() {
         'last=$(cat "$d/widget-trigger.stamp" 2>/dev/null); ' +
         'case "$last" in ""|*[!0-9]*) last=0;; esac; ' +
         'if [ "$last" -le "$now" ] && [ $((now - last)) -lt ' + MIN_TRIGGER_SECONDS + ' ]; then exit ' +
-        SKIPPED_EXIT_CODE + '; fi; ' +
+        TOO_SOON_EXIT_CODE + '; fi; ' +
         'echo "$now" > "$d/widget-trigger.stamp"; ' +
         'exec systemctl --user start truenas-widget.service';
 }
@@ -227,11 +229,15 @@ function triggerCommand() {
 //   st          : zuletzt gelesene status.json (oder null)
 //   triggerExit : Exit-Code des Startbefehls, null solange er noch läuft
 //   timedOut    : true, wenn CHECK_TIMEOUT_SECONDS abgelaufen sind
-// Ergebnis: "done" (neue Daten da), "failed" oder "pending" (weiter warten)
+// Ergebnis: "done" (neue Daten da), "failed", "skipped" (zu kurz nach dem
+// letzten Start, nichts gestartet) oder "pending" (weiter warten)
 function checkOutcome(epochBefore, st, triggerExit, timedOut) {
     var epoch = (st && st.checked_at_epoch) ? Number(st.checked_at_epoch) : 0;
     if (epoch > epochBefore) {
         return "done";
+    }
+    if (triggerExit === TOO_SOON_EXIT_CODE) {
+        return "skipped";
     }
     if (timedOut) {
         return "failed";
@@ -248,11 +254,19 @@ function headerText(eff, checking) {
     return checking ? "Prüfe…" : eff.text;
 }
 
-// Zeilen der Vollansicht, ergänzt um den Hinweis bei fehlgeschlagener Prüfung.
-function linesWithCheckState(lines, failed) {
-    if (!failed) {
-        return lines;
+// Hinweis, wenn "Jetzt prüfen" zu früh geklickt wurde.
+var TOO_SOON_TEXT = "Bitte kurz warten – höchstens eine Prüfung pro Minute.";
+
+// Zeilen der Vollansicht, ergänzt um die Hinweise zur Prüfung:
+//   failed : "Prüfung fehlgeschlagen" (bisheriger Stand bleibt sichtbar)
+//   notice : kurzer Hinweis, z. B. TOO_SOON_TEXT (oder "")
+function linesWithCheckState(lines, failed, notice) {
+    var extra = [];
+    if (notice) {
+        extra.push({ kind: "hint", text: notice, level: "" });
     }
-    return [{ kind: "hint", text: "Prüfung fehlgeschlagen – bisheriger Stand wird angezeigt.", level: "" }]
-        .concat(lines);
+    if (failed) {
+        extra.push({ kind: "hint", text: "Prüfung fehlgeschlagen – bisheriger Stand wird angezeigt.", level: "" });
+    }
+    return extra.length ? extra.concat(lines) : lines;
 }

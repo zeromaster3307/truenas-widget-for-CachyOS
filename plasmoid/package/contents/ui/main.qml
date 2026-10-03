@@ -35,11 +35,13 @@ PlasmoidItem {
     property double epochBeforeCheck: 0   // checked_at_epoch vor dem Start
     property var triggerExit: null        // Exit-Code des Startbefehls
     property double lastTriggerMs: 0      // zusätzlicher Schutz innerhalb des Widgets
+    property bool manualCheck: false      // wurde die laufende Prüfung per "Jetzt prüfen" gestartet?
+    property string notice: ""            // kurzer Hinweis, z. B. "Bitte kurz warten"
 
     readonly property string systemName: (st && st.system_name) ? st.system_name : "TrueNAS"
     readonly property color statusColor: Logic.color(eff.status)
     readonly property string headerText: Logic.headerText(eff, checking)
-    readonly property var shownLines: Logic.linesWithCheckState(lines, checkFailed)
+    readonly property var shownLines: Logic.linesWithCheckState(lines, checkFailed, notice)
 
     // Datei lesen über die Shell (Plasma-"executable"-Datenquelle).
     // ${XDG_CACHE_HOME:-$HOME/.cache} entspricht dem Pfad, den der Prüfer benutzt.
@@ -52,7 +54,8 @@ PlasmoidItem {
                      : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: systemName + ": " + headerText
-    toolTipSubText: (checkFailed ? "Prüfung fehlgeschlagen.\n" : "")
+    toolTipSubText: (notice ? notice + "\n" : "")
+                    + (checkFailed ? "Prüfung fehlgeschlagen.\n" : "")
                     + Logic.tooltip(st, eff) + "\n" + Logic.lastCheckText(st, nowMs)
 
     // Auf dem Desktop (genug Platz) Vollansicht, im Panel nur das Icon.
@@ -70,7 +73,7 @@ PlasmoidItem {
             // Prüfintervall, eine Prüfung anstossen. Ist sie frisch: nichts tun.
             root.startupDecided = true;
             if (Logic.needsCheck(parsed, root.nowMs)) {
-                root.startCheck();
+                root.startCheck(false);
             }
             return;
         }
@@ -81,12 +84,22 @@ PlasmoidItem {
         }
     }
 
-    function startCheck() {
+    // manual = true: per Rechtsklick "Jetzt prüfen" ausgelöst. Es gilt dieselbe
+    // Sperre (höchstens einmal pro Minute); bei zu frühem Klick erscheint ein Hinweis.
+    function startCheck(manual) {
+        if (root.checking) {
+            return;  // läuft schon
+        }
         var now = Date.now();
         if (now - root.lastTriggerMs < Logic.MIN_TRIGGER_SECONDS * 1000) {
+            if (manual) {
+                root.showNotice(Logic.TOO_SOON_TEXT);
+            }
             return;
         }
         root.lastTriggerMs = now;
+        root.manualCheck = manual;
+        root.notice = "";
         root.epochBeforeCheck = (root.st && root.st.checked_at_epoch) ? Number(root.st.checked_at_epoch) : 0;
         root.triggerExit = null;
         root.checkFailed = false;
@@ -105,7 +118,30 @@ PlasmoidItem {
         root.checkFailed = (outcome === "failed");  // bisheriger Stand bleibt sichtbar
         checkTimeout.stop();
         pollTimer.stop();
+        if (outcome === "skipped" && root.manualCheck) {
+            // z. B. ein anderes Widget hat gerade erst geprüft
+            root.showNotice(Logic.TOO_SOON_TEXT);
+        }
     }
+
+    function showNotice(text) {
+        root.notice = text;
+        noticeTimer.restart();
+    }
+
+    // Rechtsklick-Menü des Widgets (Panel und Desktop): "Jetzt prüfen".
+    // Startet dieselbe Prüfung wie beim Widget-Start, also NUR
+    // "systemctl --user start truenas-widget.service" (siehe logic.js).
+    // Belegt im KDE-Quellcode Plasma 6.4 (z. B. kdeplasma-addons, applets/timer):
+    // Plasmoid.contextualActions mit PlasmaCore.Action.
+    Plasmoid.contextualActions: [
+        PlasmaCore.Action {
+            text: "Jetzt prüfen"
+            icon.name: "view-refresh"
+            enabled: !root.checking
+            onTriggered: root.startCheck(true)
+        }
+    ]
 
     function refresh() {
         reader.connectSource(readCommand);
@@ -146,6 +182,14 @@ PlasmoidItem {
             root.triggerExit = Number(data["exit code"]);
             root.refresh();  // neue status.json lesen; Auswertung in applyStatus
         }
+    }
+
+    // Hinweis "Bitte kurz warten" nach 10 s wieder ausblenden.
+    Timer {
+        id: noticeTimer
+        interval: 10 * 1000
+        repeat: false
+        onTriggered: root.notice = ""
     }
 
     // Läuft die Prüfung zu lange: bisherigen Stand + "Prüfung fehlgeschlagen".
