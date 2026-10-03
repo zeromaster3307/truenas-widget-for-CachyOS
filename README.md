@@ -63,6 +63,11 @@ Das Projekt besteht aus drei Teilen:
      „+ n weitere“). Unten klein die Uhrzeit der letzten Prüfung.
    - Ein Klick öffnet die TrueNAS-Oberfläche im Browser.
    - Ist die Datei älter als 45 Minuten, zeigt das Widget grau „Veraltet“.
+   - **Beim Start** (z. B. nach dem Anmelden) prüft das Widget einmal, ob
+     `status.json` fehlt oder älter als das Prüfintervall ist. Nur dann
+     startet es **einmalig** den Prüfer-Dienst (Details in
+     [Abschnitt 5](#prüfung-beim-start-des-widgets)). Während der Prüfung
+     steht dort „Prüfe…“.
 3. **Diagnose-Skript.** Prüft die Verbindung, zeigt den
    Zertifikats-Fingerabdruck und listet die **Feldnamen und Datentypen** der
    TrueNAS-Antworten auf (keine Werte). Damit können die Felder gegen Ihr
@@ -81,6 +86,9 @@ Das Projekt besteht aus drei Teilen:
 - **Kein unverschlüsseltes HTTP.** `http://` und `ws://` werden abgelehnt.
 - **Keine abgeschaltete Zertifikatsprüfung.** Stattdessen wird der
   Fingerabdruck des Zertifikats verglichen (Abschnitt 4).
+- **Das Widget spricht nie mit TrueNAS.** Es liest nur `status.json` und
+  darf genau einen Befehl ausführen: `systemctl --user start
+  truenas-widget.service` – ohne Parameter, ohne Key, ohne Adresse.
 - **Kein Alarm, wenn das TrueNAS nicht erreichbar ist** (anderes Netz,
   ausgeschaltet …). Dann ist das Widget einfach grau.
 - **Der API-Key** steht nie im Repo, nie in Logs, nie in Fehlermeldungen,
@@ -290,7 +298,8 @@ cd truenas-widget-for-CachyOS
 - legt `~/.config/truenas-widget/` an (Rechte 700) und kopiert die
   Beispiel-Konfiguration als `config.toml` dorthin – **nur falls noch keine
   existiert**,
-- richtet den systemd-User-Timer ein und startet ihn,
+- richtet den systemd-User-Timer ein (`systemctl --user enable --now`) und
+  stösst eine erste Prüfung im Hintergrund an,
 - installiert das Plasma-Widget (`kpackagetool6`).
 
 Danach:
@@ -319,12 +328,51 @@ Datei: `~/.config/truenas-widget/config.toml` (Vorlage:
 | `fingerprint_sha256` | Zertifikats-Fingerabdruck (Abschnitt 4) |
 | `api_version` | API-Version im Pfad, Standard `v25.10.0` |
 | `[key] source` | `"file"` (Standard) oder `"secret-tool"` |
-| `[checker] interval_minutes` | Prüfabstand in Minuten (Standard 15) |
+| `[checker] interval_minutes` | Prüfabstand in Minuten (Standard 15). Erlaubt: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440 |
 | `[checker] timeout_seconds` | Wartezeit auf TrueNAS |
 | `[notifications] enabled` | Benachrichtigungen an/aus |
 
 Nach Änderung von `interval_minutes` bitte `./install.sh` erneut ausführen
 (stellt den Timer um). Andere Änderungen wirken bei der nächsten Prüfung.
+
+Fehlt der Abschnitt `[truenas]` oder darin `host`, meldet das Programm:
+„Abschnitt [truenas] fehlt oder 'host' darin fehlt“.
+
+### Wann geprüft wird (systemd-Timer)
+
+Der Timer läuft nach der Uhr, z. B. bei 15 Minuten um xx:00, xx:15, xx:30
+und xx:45 (`OnCalendar=`). Mit `Persistent=true` holt er eine verpasste
+Prüfung sofort nach, wenn der PC aus war. Laut systemd-Dokumentation
+(systemd.timer(5)) wirkt `Persistent=true` **nur** zusammen mit
+`OnCalendar=`. Deshalb muss das Intervall glatt in eine Stunde bzw. einen Tag
+passen (Liste oben). Nach dem Aufwachen aus dem Ruhezustand startet systemd
+eine verpasste Prüfung ebenfalls gleich.
+
+### Prüfung beim Start des Widgets
+
+Damit nach dem Anmelden nicht bis zu 15 Minuten alte Daten zu sehen sind:
+
+1. Das Widget liest beim Start `status.json`.
+2. Ist die Datei **frisch** (jünger als `interval_minutes`): nichts tun.
+3. Fehlt sie oder ist sie **älter** als `interval_minutes`: **einmalig**
+   `systemctl --user start truenas-widget.service` ausführen. Das ist
+   derselbe Dienst, den auch der Timer startet.
+4. Während der Prüfung steht „Prüfe…“ neben dem Namen.
+5. Kommen nach 150 Sekunden keine neuen Daten (der Dienst selbst bricht nach
+   120 Sekunden ab), bleibt der bisherige Stand stehen, mit dem Hinweis
+   **„Prüfung fehlgeschlagen“**.
+
+**Schutz gegen Mehrfachstarts:** Höchstens **ein Start pro Minute**, auch
+wenn Plasma neu startet oder mehrere TrueNAS-Widgets auf dem Desktop
+liegen. Dafür benutzt der Startbefehl zwei kleine Dateien in
+`~/.cache/truenas-widget/`: `widget-trigger.stamp` (Uhrzeit des letzten
+Starts) und `widget-trigger.lock` (Sperre, solange eine Prüfung läuft).
+
+**Was das Widget dabei NICHT tut:** Es startet **nur** diesen einen Dienst,
+ohne Parameter. Es liest keinen Key, kennt keine Adresse und baut selbst
+keine Verbindung zu TrueNAS auf. Die Abfrage macht wie immer der Prüfer im
+Dienst. Den genauen Befehl finden Sie in
+`plasmoid/package/contents/code/logic.js` (Funktion `triggerCommand`).
 
 ### Benachrichtigungen abschalten
 
@@ -387,6 +435,10 @@ keinen Key, keine Adresse und keine Werte und darf weitergegeben werden.
 | „Kein Zertifikats-Fingerabdruck eingetragen“ | Platzhalter noch in der Konfiguration | Abschnitt 4 |
 | Grau, „Veraltet“ | Prüfer läuft nicht (oder PC war im Ruhezustand) | `systemctl --user status truenas-widget.timer`, `journalctl --user -u truenas-widget.service -n 30` |
 | Grau, „Noch keine Daten“ | Prüfer lief noch nie | `systemctl --user start truenas-widget.service` |
+| „Prüfung fehlgeschlagen“ | Das Widget hat beim Start eine Prüfung angestossen, aber nach 150 s keine neuen Daten bekommen (Dienst nicht installiert, hängt, oder Fehler) | `systemctl --user status truenas-widget.service`, `journalctl --user -u truenas-widget.service -n 30`; ggf. `./install.sh` erneut |
+| Dauerhaft „Prüfe…“ | Sollte nach spätestens 150 s verschwinden | Plasma neu anmelden; Meldungen wie oben prüfen |
+| „Abschnitt [truenas] fehlt oder 'host' darin fehlt“ | `config.toml` unvollständig, oder `host` steht ausserhalb von `[truenas]` | Mit `config.example.toml` vergleichen |
+| „'interval_minutes' = … ist nicht möglich“ | Intervall passt nicht glatt in Stunde/Tag | Einen Wert aus der Liste in Abschnitt 5 wählen, dann `./install.sh` |
 | Keine Benachrichtigungen | abgeschaltet, `notify-send` fehlt, oder Ereignis schon gemeldet | `[notifications] enabled`, `sudo pacman -S libnotify` |
 | Widget nicht in der Liste | Kein Plasma 6 oder Installation fehlgeschlagen | `plasmashell --version`, `./install.sh` erneut |
 | „WebSocket-Aufbau abgelehnt (HTTP 404)“ | API-Pfad passt nicht zur TrueNAS-Version | `api_version = "current"` probieren und Diagnose erneut ausführen |
@@ -410,7 +462,12 @@ alles ok · App-Updates · Systemupdate · Warnung · kritisch · quittierter Al
 Fingerabdruck (es wird nichts gesendet) · fehlende Rechte · Whitelist
 verweigert Schreibmethoden · `http://` wird abgelehnt · Key-Datei mit zu
 offenen Rechten · Benachrichtigung nur einmal pro Ereignis · veraltete
-status.json · max. 5 Alert-Zeilen. Jeder Test prüft, dass der Key in keinem
+status.json · max. 5 Alert-Zeilen · Prüfung beim Widget-Start nur bei
+fehlender/veralteter Datei · höchstens ein Start pro Minute (auch bei zwei
+Widgets gleichzeitig; der Startbefehl wird dafür echt mit `sh` ausgeführt,
+`systemctl` ist eine Attrappe) · „Prüfe…“/„Prüfung fehlgeschlagen“ · Timer mit
+`OnCalendar` + `Persistent=true` (Ausdrücke mit `systemd-analyze` geprüft) ·
+`install.sh` mit `enable --now`. Jeder Test prüft, dass der Key in keinem
 Log auftaucht.
 
 Vor jedem Commit: `./tools/check-secrets.sh` (sucht nach IP-Adressen,
@@ -506,10 +563,22 @@ Diese Punkte konnten ohne Ihr System nicht getestet werden:
    benutzten Plasma-Bausteine (`PlasmoidItem`, `plasma5support`-Datenquelle
    „executable“) sind im KDE-Quellcode Plasma 6.4 belegt; ein Probelauf auf
    einem echten Desktop fehlt.
-6. **KWallet als Secret-Service** (Abschnitt 3, Weg B).
-7. **Benachrichtigungen** über `notify-send` aus dem systemd-User-Dienst
+6. **Befehle aus dem Widget starten:** Die offizielle KDE-Entwicklerdoku
+   (develop.kde.org) war aus der Entwicklungsumgebung nicht erreichbar.
+   Belegt ist aus dem Quellcode (plasma-workspace 6.4,
+   `dataengines/executable/executable.cpp`): Die „executable“-Datenquelle
+   führt den Befehl über die Shell aus und liefert `exit code` und `stdout`.
+   Einen eigenen Timeout hat sie nicht, den übernimmt das Widget (150 s).
+   Laut KDE-Forum gilt sie in Plasma 6 als veraltet, ist aber noch enthalten;
+   ein offizieller Ersatz ist nicht dokumentiert
+   ([discuss.kde.org](https://discuss.kde.org/t/official-way-to-excecute-cli-commands-in-plasma-6-plasmoids/6772)).
+   Ungeprüft: dass `systemctl --user` aus plasmashell heraus funktioniert
+   (sollte es, da plasmashell in Ihrer Benutzersitzung läuft) und dass `flock`
+   installiert ist (Teil von util-linux, auf CachyOS Standard).
+7. **KWallet als Secret-Service** (Abschnitt 3, Weg B).
+8. **Benachrichtigungen** über `notify-send` aus dem systemd-User-Dienst
    (funktioniert unter Plasma normalerweise; nicht auf Ihrem System getestet).
-8. **Bezeichnungen in der deutschen TrueNAS-Oberfläche** – hier stehen die
+9. **Bezeichnungen in der deutschen TrueNAS-Oberfläche** – hier stehen die
    englischen Originalnamen aus dem Quellcode.
 
 ### Lizenz
