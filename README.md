@@ -68,6 +68,8 @@ Das Projekt besteht aus drei Teilen:
      startet es **einmalig** den Prüfer-Dienst (Details in
      [Abschnitt 5](#prüfung-beim-start-des-widgets)). Während der Prüfung
      steht dort „Prüfe…“.
+   - **Manuell prüfen:** Rechtsklick auf das Widget → **Jetzt prüfen**
+     (Details in [Abschnitt 5](#prüfung-manuell-anstossen-jetzt-prüfen)).
 3. **Diagnose-Skript.** Prüft die Verbindung, zeigt den
    Zertifikats-Fingerabdruck und listet die **Feldnamen und Datentypen** der
    TrueNAS-Antworten auf (keine Werte). Damit können die Felder gegen Ihr
@@ -374,6 +376,24 @@ keine Verbindung zu TrueNAS auf. Die Abfrage macht wie immer der Prüfer im
 Dienst. Den genauen Befehl finden Sie in
 `plasmoid/package/contents/code/logic.js` (Funktion `triggerCommand`).
 
+### Prüfung manuell anstossen („Jetzt prüfen“)
+
+**Rechtsklick auf das Widget** (im Panel oder auf dem Desktop) → **Jetzt
+prüfen**.
+
+- Es läuft genau dieselbe Prüfung wie beim Widget-Start: „Prüfe…“, danach
+  das neue Ergebnis oder nach 150 s „Prüfung fehlgeschlagen“.
+- Auch hier gilt **höchstens eine Prüfung pro Minute** (für alle Starts aus
+  Widgets zusammen; der Timer ist davon nicht betroffen). Klicken Sie zu früh, erscheint
+  für 10 Sekunden „Bitte kurz warten – höchstens eine Prüfung pro Minute.“
+- Während eine Prüfung läuft, ist der Menüeintrag ausgegraut.
+- Sicherheit wie oben: Das Widget startet nur
+  `systemctl --user start truenas-widget.service`, ohne Parameter.
+
+Ohne Widget geht es weiterhin im Terminal:
+`systemctl --user start truenas-widget.service`. Dieser Weg ist nicht an
+die Minutensperre gebunden.
+
 ### Benachrichtigungen abschalten
 
 In `config.toml`:
@@ -436,6 +456,8 @@ keinen Key, keine Adresse und keine Werte und darf weitergegeben werden.
 | Grau, „Veraltet“ | Prüfer läuft nicht (oder PC war im Ruhezustand) | `systemctl --user status truenas-widget.timer`, `journalctl --user -u truenas-widget.service -n 30` |
 | Grau, „Noch keine Daten“ | Prüfer lief noch nie | `systemctl --user start truenas-widget.service` |
 | „Prüfung fehlgeschlagen“ | Das Widget hat beim Start eine Prüfung angestossen, aber nach 150 s keine neuen Daten bekommen (Dienst nicht installiert, hängt, oder Fehler) | `systemctl --user status truenas-widget.service`, `journalctl --user -u truenas-widget.service -n 30`; ggf. `./install.sh` erneut |
+| „Bitte kurz warten – höchstens eine Prüfung pro Minute.“ | „Jetzt prüfen“ innerhalb einer Minute nach der letzten vom Widget gestarteten Prüfung | Eine Minute warten. Gewollter Schutz gegen Mehrfachstarts |
+| Kein Eintrag „Jetzt prüfen“ im Rechtsklick-Menü | Altes Widget noch geladen | `./install.sh` erneut ausführen, dann ab- und wieder anmelden |
 | Dauerhaft „Prüfe…“ | Sollte nach spätestens 150 s verschwinden | Plasma neu anmelden; Meldungen wie oben prüfen |
 | „Abschnitt [truenas] fehlt oder 'host' darin fehlt“ | `config.toml` unvollständig, oder `host` steht ausserhalb von `[truenas]` | Mit `config.example.toml` vergleichen |
 | „'interval_minutes' = … ist nicht möglich“ | Intervall passt nicht glatt in Stunde/Tag | Einen Wert aus der Liste in Abschnitt 5 wählen, dann `./install.sh` |
@@ -465,7 +487,8 @@ offenen Rechten · Benachrichtigung nur einmal pro Ereignis · veraltete
 status.json · max. 5 Alert-Zeilen · Prüfung beim Widget-Start nur bei
 fehlender/veralteter Datei · höchstens ein Start pro Minute (auch bei zwei
 Widgets gleichzeitig; der Startbefehl wird dafür echt mit `sh` ausgeführt,
-`systemctl` ist eine Attrappe) · „Prüfe…“/„Prüfung fehlgeschlagen“ · Timer mit
+`systemctl` ist eine Attrappe) · „Prüfe…“/„Prüfung fehlgeschlagen“ · „Jetzt prüfen“ im Rechtsklick-Menü mit
+Hinweis bei zu frühem Klick · Timer mit
 `OnCalendar` + `Persistent=true` (Ausdrücke mit `systemd-analyze` geprüft) ·
 `install.sh` mit `enable --now`. Jeder Test prüft, dass der Key in keinem
 Log auftaucht.
