@@ -28,6 +28,12 @@ class ConfigError(Exception):
     """Fehler in der Konfiguration. Die Meldung ist für Menschen gedacht."""
 
 
+MISSING_HOST_MSG = (
+    "Abschnitt [truenas] fehlt oder 'host' darin fehlt. "
+    "Bitte in config.toml eintragen, z. B.:\n  [truenas]\n  host = \"192.168.1.20\""
+)
+
+
 # Unsichere Adress-Präfixe, die wir ausdrücklich ablehnen.
 _INSECURE_SCHEMES = ("http://", "ws://")
 # Sichere Präfixe, die wir tolerieren und einfach entfernen.
@@ -58,7 +64,7 @@ def parse_host(raw: str) -> str:
     - Pfade oder Ports im host-Feld sind nicht erlaubt (Port hat ein eigenes Feld).
     """
     if not isinstance(raw, str) or not raw.strip():
-        raise ConfigError("In der Konfiguration fehlt 'host' (Adresse des TrueNAS).")
+        raise ConfigError(MISSING_HOST_MSG)
     host = raw.strip()
     lower = host.lower()
     for scheme in _INSECURE_SCHEMES:
@@ -147,7 +153,10 @@ def from_dict(data: dict, *, require_fingerprint: bool = True) -> Config:
         parse_host(_get(tn, "url", str))
         raise ConfigError("Bitte statt 'url' die Felder 'host' und 'port' verwenden.")
 
-    host = parse_host(_get(tn, "host", str, required=True))
+    if "host" not in tn:
+        # Häufigster Fall: Abschnitt vergessen oder "host" ausserhalb von [truenas].
+        raise ConfigError(MISSING_HOST_MSG)
+    host = parse_host(_get(tn, "host", str))
     port = _get(tn, "port", int, default=443)
     if not 1 <= port <= 65535:
         raise ConfigError("'port' muss zwischen 1 und 65535 liegen.")

@@ -68,6 +68,16 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.interval_minutes, 15)
         self.assertTrue(cfg.notifications)
 
+    def test_fehlender_abschnitt_truenas(self):
+        for data in ({}, {"checker": {"interval_minutes": 15}},
+                     {"host": "192.168.1.20"},            # host ausserhalb von [truenas]
+                     {"truenas": {"port": 5443}},         # Abschnitt da, host fehlt
+                     {"truenas": {"host": "  "}}):        # host leer
+            with self.subTest(data=data):
+                with self.assertRaises(c.ConfigError) as ctx:
+                    c.from_dict(data)
+                self.assertIn("Abschnitt [truenas] fehlt oder 'host' darin fehlt", str(ctx.exception))
+
     def test_ungueltiges_intervall(self):
         data = {"truenas": BASE["truenas"], "checker": {"interval_minutes": 0}}
         with self.assertRaises(c.ConfigError):
