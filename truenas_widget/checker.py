@@ -150,6 +150,8 @@ def base_status(cfg, now: float | None = None) -> dict:
         "web_url": cfg.web_url if cfg else None,
         "checked_at": datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds"),
         "checked_at_epoch": int(now),
+        # Für das Widget: ab wann status.json als "nicht mehr frisch" gilt.
+        "interval_minutes": cfg.interval_minutes if cfg else None,
         "status": "offline",
         "status_text": STATUS_TEXT["offline"],
         "offline_reason": None,

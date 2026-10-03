@@ -28,6 +28,7 @@ class EvaluateTests(unittest.TestCase):
         self.assertFalse(st["system_update"]["available"])
         self.assertEqual(st["system_name"], "Test-NAS")
         self.assertEqual(st["checked_at_epoch"], 1_700_000_000)
+        self.assertEqual(st["interval_minutes"], 15)  # das Widget braucht das Intervall
 
     def test_app_updates(self):
         st = status_for(fx.scenario(**{"app.query": [
@@ -104,6 +105,7 @@ class EvaluateTests(unittest.TestCase):
         st = checker.offline_status(make_cfg(), "Nicht erreichbar", now=1)
         self.assertEqual(st["status"], "offline")
         self.assertEqual(st["offline_reason"], "Nicht erreichbar")
+        self.assertEqual(st["interval_minutes"], 15)
 
 
 if __name__ == "__main__":
