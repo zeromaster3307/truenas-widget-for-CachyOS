@@ -1,0 +1,26 @@
+# --- Geheimnisse und echte Konfiguration: NIE ins Repo ---
+# Die echte Konfiguration und der API-Key liegen in ~/.config/truenas-widget/
+# (ausserhalb des Repos). Falls jemand sie versehentlich hierher kopiert,
+# verhindern diese Regeln das Einchecken.
+api-key
+*.api-key
+api_key*
+config.toml
+!config.example.toml
+*.pem
+*.key
+*.crt
+status.json
+notified.json
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- Editor/OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
