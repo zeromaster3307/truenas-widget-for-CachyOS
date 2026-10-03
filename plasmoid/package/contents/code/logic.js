@@ -167,3 +167,92 @@ function tooltip(st, eff) {
     }
     return parts.join(", ");
 }
+
+// ------------------------------------------------------------------------
+// Prüfung beim Start des Widgets auslösen
+// ------------------------------------------------------------------------
+//
+// SICHERHEIT: Das Widget startet NUR den Dienst "truenas-widget.service"
+// über "systemctl --user start", ohne Parameter. Es übergibt keinen Key,
+// keine Adresse und hat selbst keinen Zugriff auf TrueNAS. Die eigentliche
+// Abfrage macht wie immer der Prüfer (Python) im Dienst.
+
+// Wird benutzt, wenn status.json kein Intervall enthält (ältere Datei).
+var DEFAULT_INTERVAL_MINUTES = 15;
+
+// Nie öfter als einmal pro Minute auslösen.
+var MIN_TRIGGER_SECONDS = 60;
+
+// Danach gilt die Prüfung als fehlgeschlagen. Der Dienst selbst bricht nach
+// 120 s ab (TimeoutStartSec in truenas-widget.service), plus Reserve.
+var CHECK_TIMEOUT_SECONDS = 150;
+
+// Rückgabewert des Startbefehls, wenn er bewusst NICHTS gestartet hat
+// (letzter Start < 60 s her, oder ein anderes Widget startet gerade).
+var SKIPPED_EXIT_CODE = 75;
+
+// true = status.json fehlt/ist unlesbar oder älter als das Prüfintervall.
+function needsCheck(st, nowMs) {
+    if (!st || !st.checked_at_epoch) {
+        return true;
+    }
+    var interval = Number(st.interval_minutes) > 0 ? Number(st.interval_minutes) : DEFAULT_INTERVAL_MINUTES;
+    var ageMs = nowMs - Number(st.checked_at_epoch) * 1000;
+    return ageMs > interval * 60000;
+}
+
+// Der Shell-Befehl, den das Widget (einmalig beim Start) ausführt.
+//
+// Schutz gegen Mehrfachstarts (Plasma-Neustart, mehrere Widgets):
+//  - flock: läuft schon ein Start eines anderen Widgets, sofort aufhören.
+//  - Zeitstempel-Datei: liegt der letzte Start keine 60 s zurück, aufhören.
+// Beide Dateien liegen in ~/.cache/truenas-widget/ und enthalten nur eine Uhrzeit.
+// "systemctl --user start" wartet, bis der Dienst (Type=oneshot) fertig ist.
+function triggerCommand() {
+    return 'd="${XDG_CACHE_HOME:-$HOME/.cache}/truenas-widget"; ' +
+        'mkdir -p "$d" || exit 1; ' +
+        'exec 9>"$d/widget-trigger.lock"; ' +
+        'flock -n 9 || exit ' + SKIPPED_EXIT_CODE + '; ' +
+        'now=$(date +%s); ' +
+        'last=$(cat "$d/widget-trigger.stamp" 2>/dev/null); ' +
+        'case "$last" in ""|*[!0-9]*) last=0;; esac; ' +
+        'if [ "$last" -le "$now" ] && [ $((now - last)) -lt ' + MIN_TRIGGER_SECONDS + ' ]; then exit ' +
+        SKIPPED_EXIT_CODE + '; fi; ' +
+        'echo "$now" > "$d/widget-trigger.stamp"; ' +
+        'exec systemctl --user start truenas-widget.service';
+}
+
+// Wie steht eine laufende Prüfung?
+//   epochBefore : checked_at_epoch VOR dem Start (0, wenn keine Datei)
+//   st          : zuletzt gelesene status.json (oder null)
+//   triggerExit : Exit-Code des Startbefehls, null solange er noch läuft
+//   timedOut    : true, wenn CHECK_TIMEOUT_SECONDS abgelaufen sind
+// Ergebnis: "done" (neue Daten da), "failed" oder "pending" (weiter warten)
+function checkOutcome(epochBefore, st, triggerExit, timedOut) {
+    var epoch = (st && st.checked_at_epoch) ? Number(st.checked_at_epoch) : 0;
+    if (epoch > epochBefore) {
+        return "done";
+    }
+    if (timedOut) {
+        return "failed";
+    }
+    if (triggerExit !== null && triggerExit !== undefined &&
+            triggerExit !== 0 && triggerExit !== SKIPPED_EXIT_CODE) {
+        return "failed";  // z. B. Dienst nicht installiert
+    }
+    return "pending";
+}
+
+// Text neben dem Namen: während der Prüfung "Prüfe…", sonst der Status.
+function headerText(eff, checking) {
+    return checking ? "Prüfe…" : eff.text;
+}
+
+// Zeilen der Vollansicht, ergänzt um den Hinweis bei fehlgeschlagener Prüfung.
+function linesWithCheckState(lines, failed) {
+    if (!failed) {
+        return lines;
+    }
+    return [{ kind: "hint", text: "Prüfung fehlgeschlagen – bisheriger Stand wird angezeigt.", level: "" }]
+        .concat(lines);
+}

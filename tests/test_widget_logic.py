@@ -6,8 +6,10 @@ alle in logic.js und werden hier geprüft. Ohne Node.js wird übersprungen.
 """
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -109,3 +111,159 @@ class WidgetLogicTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+JS_EVAL = r"""
+const fs = require('fs'); const vm = require('vm');
+const src = fs.readFileSync(process.argv[1], 'utf8').replace(/^\.pragma library\s*$/m, '');
+const ctx = {}; vm.createContext(ctx); vm.runInContext(src, ctx);
+const exprs = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(exprs.map(e => vm.runInContext(e, ctx))));
+"""
+
+
+def js(*exprs):
+    proc = subprocess.run(["node", "-e", JS_EVAL, str(LOGIC)], input=json.dumps(list(exprs)),
+                          capture_output=True, text=True, check=True)
+    return json.loads(proc.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "Node.js nicht installiert")
+class StartupCheckLogicTests(unittest.TestCase):
+    """Beim Start: nur prüfen, wenn status.json fehlt oder älter als das Intervall ist."""
+
+    def needs(self, st_obj, age_min):
+        now = (NOW + age_min * 60) * 1000
+        return js(f"needsCheck({json.dumps(st_obj)}, {now})")[0]
+
+    def test_datei_fehlt(self):
+        self.assertTrue(self.needs(None, 0))
+
+    def test_frisch_tut_nichts(self):
+        self.assertFalse(self.needs(st("ok", interval_minutes=15), 14))
+
+    def test_aelter_als_intervall(self):
+        self.assertTrue(self.needs(st("ok", interval_minutes=15), 16))
+
+    def test_konfiguriertes_intervall_zaehlt(self):
+        self.assertFalse(self.needs(st("ok", interval_minutes=60), 50))
+        self.assertTrue(self.needs(st("ok", interval_minutes=5), 6))
+
+    def test_ohne_intervall_gilt_standard_15(self):
+        self.assertFalse(self.needs(st("ok"), 14))
+        self.assertTrue(self.needs(st("ok"), 16))
+
+    def test_auch_offline_status_ist_frisch(self):
+        # "offline" ist ein gültiges Ergebnis - kein Grund für eine weitere Prüfung
+        self.assertFalse(self.needs(st("offline", interval_minutes=15), 1))
+
+    def test_ergebnis_der_pruefung(self):
+        new = json.dumps(st("ok", checked_at_epoch=NOW + 100))
+        old = json.dumps(st("ok"))
+        r = js(f"checkOutcome({NOW}, {new}, null, false)",   # neue Daten -> fertig
+               f"checkOutcome({NOW}, {old}, null, false)",   # noch nichts -> warten
+               f"checkOutcome({NOW}, {old}, 0, false)",      # Dienst fertig, Datei noch alt -> warten
+               f"checkOutcome({NOW}, {old}, 75, false)",     # übersprungen -> warten
+               f"checkOutcome({NOW}, {old}, null, true)",    # Timeout -> fehlgeschlagen
+               f"checkOutcome({NOW}, {old}, 5, false)",      # systemctl-Fehler -> fehlgeschlagen
+               f"checkOutcome(0, null, null, true)",         # keine Datei + Timeout
+               f"checkOutcome(0, {new}, 0, false)")          # erste Datei überhaupt
+        self.assertEqual(r, ["done", "pending", "pending", "pending", "failed", "failed", "failed", "done"])
+
+    def test_anzeige_pruefe_und_fehlgeschlagen(self):
+        r = js('headerText({text: "OK"}, true)', 'headerText({text: "OK"}, false)',
+               'linesWithCheckState([], true)', 'linesWithCheckState([], false)')
+        self.assertEqual(r[0], "Prüfe…")
+        self.assertEqual(r[1], "OK")
+        self.assertIn("Prüfung fehlgeschlagen", r[2][0]["text"])
+        self.assertEqual(r[3], [])
+
+    def test_konstanten(self):
+        self.assertEqual(js("MIN_TRIGGER_SECONDS", "SKIPPED_EXIT_CODE"), [60, 75])
+
+
+@unittest.skipUnless(shutil.which("node") and shutil.which("flock"), "Node.js oder flock fehlt")
+class TriggerCommandTests(unittest.TestCase):
+    """Führt den echten Startbefehl des Widgets mit sh aus (systemctl ist eine Attrappe)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.home = root / "home"
+        self.bin = root / "bin"
+        self.calls = root / "calls"
+        self.home.mkdir()
+        self.bin.mkdir()
+        self.sleep = 0
+        self.command = js("triggerCommand()")[0]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fake_systemctl(self, sleep=0):
+        f = self.bin / "systemctl"
+        f.write_text(f'#!/bin/sh\necho "$*" >> "{self.calls}"\nsleep {sleep}\n')
+        f.chmod(0o755)
+
+    def env(self):
+        return {"HOME": str(self.home), "PATH": f"{self.bin}:{os.environ['PATH']}"}
+
+    def run_trigger(self):
+        return subprocess.run(["sh", "-c", self.command], env=self.env(), capture_output=True, text=True)
+
+    def calls_list(self):
+        return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+    def test_startet_nur_den_einen_dienst_ohne_parameter(self):
+        self.fake_systemctl()
+        self.assertEqual(self.run_trigger().returncode, 0)
+        self.assertEqual(self.calls_list(), ["--user start truenas-widget.service"])
+        # Befehl enthält keine Adresse, keinen Key, keinen Netzzugriff
+        for forbidden in ("wss://", "https://", "http://", "api-key", "secret-tool", "curl", "python"):
+            self.assertNotIn(forbidden, self.command)
+
+    def test_hoechstens_einmal_pro_minute(self):
+        self.fake_systemctl()
+        self.assertEqual(self.run_trigger().returncode, 0)
+        second = self.run_trigger()
+        self.assertEqual(second.returncode, 75)          # übersprungen
+        self.assertEqual(len(self.calls_list()), 1)
+        # Zeitstempel künstlich 61 s zurückdatieren -> wieder erlaubt
+        stamp = self.home / ".cache" / "truenas-widget" / "widget-trigger.stamp"
+        stamp.write_text(str(int(stamp.read_text()) - 61))
+        self.assertEqual(self.run_trigger().returncode, 0)
+        self.assertEqual(len(self.calls_list()), 2)
+
+    def test_zwei_widgets_gleichzeitig_nur_ein_start(self):
+        self.fake_systemctl(sleep=2)  # Prüfung dauert, Sperre bleibt so lange gehalten
+        first = subprocess.Popen(["sh", "-c", self.command], env=self.env())
+        import time
+        for _ in range(50):  # warten, bis der erste Start läuft
+            if self.calls_list():
+                break
+            time.sleep(0.05)
+        stamp = self.home / ".cache" / "truenas-widget" / "widget-trigger.stamp"
+        stamp.write_text("0")  # selbst ohne Zeitsperre greift die Datei-Sperre (flock)
+        self.assertEqual(self.run_trigger().returncode, 75)
+        self.assertEqual(first.wait(timeout=10), 0)
+        self.assertEqual(len(self.calls_list()), 1)
+
+    def test_kaputter_zeitstempel(self):
+        self.fake_systemctl()
+        d = self.home / ".cache" / "truenas-widget"
+        d.mkdir(parents=True)
+        (d / "widget-trigger.stamp").write_text("Unsinn")
+        self.assertEqual(self.run_trigger().returncode, 0)
+
+    def test_zeitstempel_in_der_zukunft_blockiert_nicht_dauerhaft(self):
+        self.fake_systemctl()
+        d = self.home / ".cache" / "truenas-widget"
+        d.mkdir(parents=True)
+        (d / "widget-trigger.stamp").write_text("99999999999")  # Uhr wurde zurückgestellt
+        self.assertEqual(self.run_trigger().returncode, 0)
+
+    def test_systemctl_fehler_wird_weitergegeben(self):
+        f = self.bin / "systemctl"
+        f.write_text("#!/bin/sh\nexit 5\n")  # z. B. Dienst nicht installiert
+        f.chmod(0o755)
+        self.assertEqual(self.run_trigger().returncode, 5)

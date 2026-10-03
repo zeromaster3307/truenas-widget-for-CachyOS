@@ -28,8 +28,18 @@ PlasmoidItem {
     property var eff: Logic.effective(null, Date.now())
     property var lines: []
 
+    // Zustand der vom Widget ausgelösten Prüfung (nur beim Start, siehe unten)
+    property bool startupDecided: false   // wurde beim Start schon entschieden?
+    property bool checking: false         // "Prüfe…" anzeigen
+    property bool checkFailed: false      // "Prüfung fehlgeschlagen" anzeigen
+    property double epochBeforeCheck: 0   // checked_at_epoch vor dem Start
+    property var triggerExit: null        // Exit-Code des Startbefehls
+    property double lastTriggerMs: 0      // zusätzlicher Schutz innerhalb des Widgets
+
     readonly property string systemName: (st && st.system_name) ? st.system_name : "TrueNAS"
     readonly property color statusColor: Logic.color(eff.status)
+    readonly property string headerText: Logic.headerText(eff, checking)
+    readonly property var shownLines: Logic.linesWithCheckState(lines, checkFailed)
 
     // Datei lesen über die Shell (Plasma-"executable"-Datenquelle).
     // ${XDG_CACHE_HOME:-$HOME/.cache} entspricht dem Pfad, den der Prüfer benutzt.
@@ -41,8 +51,9 @@ PlasmoidItem {
                      ? PlasmaCore.Types.NeedsAttentionStatus
                      : PlasmaCore.Types.ActiveStatus
 
-    toolTipMainText: systemName + ": " + eff.text
-    toolTipSubText: Logic.tooltip(st, eff) + "\n" + Logic.lastCheckText(st, nowMs)
+    toolTipMainText: systemName + ": " + headerText
+    toolTipSubText: (checkFailed ? "Prüfung fehlgeschlagen.\n" : "")
+                    + Logic.tooltip(st, eff) + "\n" + Logic.lastCheckText(st, nowMs)
 
     // Auf dem Desktop (genug Platz) Vollansicht, im Panel nur das Icon.
     switchWidth: Kirigami.Units.gridUnit * 10
@@ -53,6 +64,47 @@ PlasmoidItem {
         root.st = parsed;
         root.eff = Logic.effective(parsed, root.nowMs);
         root.lines = Logic.detailLines(parsed, root.eff);
+
+        if (!root.startupDecided) {
+            // Beim Start EINMAL: fehlt die Datei oder ist sie älter als das
+            // Prüfintervall, eine Prüfung anstossen. Ist sie frisch: nichts tun.
+            root.startupDecided = true;
+            if (Logic.needsCheck(parsed, root.nowMs)) {
+                root.startCheck();
+            }
+            return;
+        }
+        if (root.checking) {
+            root.updateCheck(false);
+        } else if (root.checkFailed && parsed && Number(parsed.checked_at_epoch) > root.epochBeforeCheck) {
+            root.checkFailed = false;  // später doch neue Daten (z. B. vom Timer)
+        }
+    }
+
+    function startCheck() {
+        var now = Date.now();
+        if (now - root.lastTriggerMs < Logic.MIN_TRIGGER_SECONDS * 1000) {
+            return;
+        }
+        root.lastTriggerMs = now;
+        root.epochBeforeCheck = (root.st && root.st.checked_at_epoch) ? Number(root.st.checked_at_epoch) : 0;
+        root.triggerExit = null;
+        root.checkFailed = false;
+        root.checking = true;
+        checkTimeout.restart();
+        pollTimer.restart();
+        trigger.connectSource(Logic.triggerCommand());
+    }
+
+    function updateCheck(timedOut) {
+        var outcome = Logic.checkOutcome(root.epochBeforeCheck, root.st, root.triggerExit, timedOut);
+        if (outcome === "pending") {
+            return;
+        }
+        root.checking = false;
+        root.checkFailed = (outcome === "failed");  // bisheriger Stand bleibt sichtbar
+        checkTimeout.stop();
+        pollTimer.stop();
     }
 
     function refresh() {
@@ -66,14 +118,51 @@ PlasmoidItem {
         }
     }
 
+    // UNGEPRÜFT (nur im KDE-Quellcode nachgelesen, nicht auf echtem Plasma 6 getestet):
+    // Die "executable"-Datenquelle aus plasma5support führt den Quellnamen als
+    // Shell-Befehl aus (KProcess::setShellCommand, plasma-workspace 6.4,
+    // dataengines/executable/executable.cpp) und liefert "exit code", "stdout"
+    // und "stderr". Sie gilt in Plasma 6 als veraltet, ist aber noch enthalten.
+    // Annahme: Nach disconnectSource() startet ein erneutes connectSource()
+    // mit demselben Befehl ihn wieder neu.
     P5Support.DataSource {
         id: reader
         engine: "executable"
         connectedSources: []
         onNewData: (sourceName, data) => {
-            root.applyStatus(Logic.parseStatus(data["stdout"]));
             disconnectSource(sourceName);  // damit der nächste Aufruf neu liest
+            root.applyStatus(Logic.parseStatus(data["stdout"]));
         }
+    }
+
+    // Startet NUR "systemctl --user start truenas-widget.service" (siehe logic.js).
+    // Die Datenquelle hat keinen eigenen Timeout; den übernimmt checkTimeout.
+    P5Support.DataSource {
+        id: trigger
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName);
+            root.triggerExit = Number(data["exit code"]);
+            root.refresh();  // neue status.json lesen; Auswertung in applyStatus
+        }
+    }
+
+    // Läuft die Prüfung zu lange: bisherigen Stand + "Prüfung fehlgeschlagen".
+    Timer {
+        id: checkTimeout
+        interval: Logic.CHECK_TIMEOUT_SECONDS * 1000
+        repeat: false
+        onTriggered: if (root.checking) { root.updateCheck(true); }
+    }
+
+    // Während der Prüfung alle 5 s nachsehen, ob neue Daten da sind
+    // (z. B. wenn ein anderes Widget die Prüfung gestartet hat).
+    Timer {
+        id: pollTimer
+        interval: 5 * 1000
+        repeat: true
+        onTriggered: root.refresh()
     }
 
     // Jede Minute neu einlesen (die Datei selbst ändert sich alle ~15 Minuten).
@@ -156,7 +245,7 @@ PlasmoidItem {
                     Layout.fillWidth: true
                 }
                 PlasmaComponents3.Label {
-                    text: root.eff.text
+                    text: root.headerText
                     color: root.statusColor
                     font.bold: true
                 }
@@ -164,7 +253,7 @@ PlasmoidItem {
 
             // Darunter nur das Relevante (bei "OK" ist diese Liste leer)
             Repeater {
-                model: root.lines
+                model: root.shownLines
                 delegate: PlasmaComponents3.Label {
                     required property var modelData
                     Layout.fillWidth: true
