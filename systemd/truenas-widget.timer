@@ -4,8 +4,8 @@
 Description=TrueNAS-Status regelmässig prüfen
 
 [Timer]
-# 1 Minute nach dem Anmelden das erste Mal ...
-OnStartupSec=1min
+# 1 Minute nach dem Start des Timers (beim Anmelden bzw. nach install.sh) das erste Mal ...
+OnActiveSec=1min
 # ... danach im eingestellten Abstand
 OnUnitActiveSec=@INTERVAL@min
 AccuracySec=30s

@@ -441,7 +441,7 @@ config.example.toml    Beispiel-Konfiguration (nur Platzhalter)
 ### Warum keine WebSocket-Bibliothek?
 
 Der Prüfer benutzt **nur die Python-Standardbibliothek** und einen kleinen
-eigenen WebSocket-Client (ca. 250 Zeilen). Gründe: Auf CachyOS/Arch soll man
+eigenen WebSocket-Client (ca. 300 Zeilen inkl. Kommentaren). Gründe: Auf CachyOS/Arch soll man
 nicht mit `pip` ins System-Python installieren; ein Zusatzpaket müsste extra
 gepflegt werden; und vor allem baut der eigene Client die TLS-Verbindung
 selbst auf und kann so den Fingerabdruck prüfen, **bevor** ein einziges Byte

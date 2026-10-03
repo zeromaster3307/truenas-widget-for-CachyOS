@@ -66,8 +66,10 @@ sed -e "s|@APPDIR@|$APPDIR|g" -e "s|@PYTHON@|$PYTHON|g" \
 sed -e "s|@INTERVAL@|$INTERVAL|g" \
     "$REPO/systemd/truenas-widget.timer" > "$UNITDIR/truenas-widget.timer"
 systemctl --user daemon-reload
-systemctl --user enable --now truenas-widget.timer >/dev/null 2>&1 || \
-    systemctl --user enable --now truenas-widget.timer
+systemctl --user enable truenas-widget.timer >/dev/null 2>&1 || \
+    systemctl --user enable truenas-widget.timer
+# Neustart, damit ein geändertes Intervall sofort gilt
+systemctl --user restart truenas-widget.timer
 say "[4/5] systemd-Timer aktiv (alle $INTERVAL Minuten)"
 
 # --- 5. Plasma-Widget ---
