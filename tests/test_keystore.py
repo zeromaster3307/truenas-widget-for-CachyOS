@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: API-Key lesen, Rechte-Warnung, Key taucht nie in Ausgaben auf."""
 
 import os

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: systemd-Timer (OnCalendar + Persistent=true) und install.sh.
 
 install.sh läuft hier in einer Sandbox: eigenes HOME, und "systemctl" sowie

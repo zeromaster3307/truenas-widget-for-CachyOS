@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Whitelist verweigert Schreibmethoden, Fehler-Zuordnung, Anmeldung."""
 
 import json

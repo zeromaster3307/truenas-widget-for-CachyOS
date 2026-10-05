@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Anzeige-Logik des Plasma-Widgets (logic.js), ausgeführt mit Node.js.
 
 Die QML-Oberfläche selbst kann ohne Plasma nicht getestet werden; die

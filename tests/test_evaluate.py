@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Auswertung der Mock-Antworten zum Gesamtstatus."""
 
 import json

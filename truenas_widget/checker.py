@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Der Prüfer: fragt alle eingerichteten TrueNAS-Systeme ab und schreibt status.json.
 
 Wird vom systemd-User-Timer regelmässig gestartet (Standard: alle 15 Minuten)

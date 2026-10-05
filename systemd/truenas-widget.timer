@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # systemd-User-Timer: startet den Prüfer regelmässig.
 # @ONCALENDAR@ setzt install.sh aus der Konfiguration (interval_minutes),
 # z. B. "*-*-* *:00/15:00" = jede Viertelstunde (xx:00, xx:15, xx:30, xx:45).

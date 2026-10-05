@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """API-Key sicher lesen.
 
 Zwei Wege werden unterstützt:

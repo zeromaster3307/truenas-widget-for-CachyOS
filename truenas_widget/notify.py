@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Desktop-Benachrichtigungen - jedes Ereignis genau einmal.
 
 Was als "schon gemeldet" gilt, steht in der Zustandsdatei

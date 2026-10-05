@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Einrichtungs-Assistent (hinzufügen, ändern, entfernen, Key, Fingerabdruck).
 
 Die Oberfläche wird durch ein "Drehbuch" ersetzt (ScriptedUI), die Verbindung

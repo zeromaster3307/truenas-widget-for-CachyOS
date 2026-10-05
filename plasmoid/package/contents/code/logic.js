@@ -1,4 +1,5 @@
 .pragma library
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Anzeige-Logik des Widgets (ohne Oberfläche, daher separat testbar).
 //
 // Das Widget liest NUR die Datei status.json, die der Prüfer schreibt.

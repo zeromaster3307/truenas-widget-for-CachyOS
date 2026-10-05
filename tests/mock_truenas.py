@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Attrappe eines TrueNAS-Servers für die Tests.
 
 Startet auf 127.0.0.1 einen kleinen TLS-WebSocket-Server mit einem

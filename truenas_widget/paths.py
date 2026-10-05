@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Alle Dateipfade an einer Stelle.
 
 Es werden die üblichen XDG-Verzeichnisse benutzt (wie bei fast allen

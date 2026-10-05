@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """JSON-RPC-2.0-Client für TrueNAS mit FESTER Whitelist.
 
 Es dürfen ausschliesslich die Methoden in ALLOWED_METHODS aufgerufen

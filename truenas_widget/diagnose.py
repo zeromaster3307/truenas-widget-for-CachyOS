@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Diagnose-Skript (nur lesend).
 
 Prüft Schritt für Schritt (für jedes eingerichtete System):

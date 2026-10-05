@@ -6,6 +6,7 @@
         "Description[de]": "Zeigt an, ob auf dem TrueNAS alles in Ordnung ist (nur lesend)",
         "Icon": "network-server",
         "Id": "local.truenasstatus",
+        "License": "GPL-3.0-or-later",
         "Name": "TrueNAS-Status",
         "Name[de]": "TrueNAS-Status",
         "Version": "0.4.1"

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Gemeinsame Test-Hilfen."""
 
 import io

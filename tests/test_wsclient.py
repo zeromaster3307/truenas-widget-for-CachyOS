@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: WebSocket-Rahmen kodieren/dekodieren (klein, mittel, gross)."""
 
 import os

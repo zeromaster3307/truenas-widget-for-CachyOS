@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * TrueNAS-Status - Plasma-6-Widget (ein oder mehrere TrueNAS-Systeme)
  *

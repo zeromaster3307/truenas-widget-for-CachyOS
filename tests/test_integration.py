@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Ende-zu-Ende-Tests gegen die TrueNAS-Attrappe (echtes TLS + WebSocket lokal).
 
 Deckt ab: alles ok, nicht erreichbar, falscher Fingerabdruck (Key wird

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Prüft alle Dateien, die ins Repo kommen (bereits eingecheckt + vorgemerkt),
 # auf Dinge, die dort nichts zu suchen haben:
 #   - IP-Adressen (ausser den Platzhaltern 192.168.1.20, 127.0.0.1, 0.0.0.0)

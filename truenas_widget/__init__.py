@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """TrueNAS-Status-Widget: nur lesender Prüfer für ein oder mehrere TrueNAS-Systeme.
 
 Dieses Paket enthält:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Kleiner WebSocket-Client (RFC 6455) über TLS mit Fingerabdruck-Prüfung.
 
 Warum eine eigene, kleine Umsetzung statt einer Bibliothek?

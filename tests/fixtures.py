@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Mock-Antworten im Format von TrueNAS 25.10.
 
 Feldnamen und Typen aus dem Quellcode TS-25.10.7 übernommen:

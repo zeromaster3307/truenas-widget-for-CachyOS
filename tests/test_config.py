@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Konfiguration (config.toml + systems/<id>.toml).
 
 http:// / ws:// werden abgelehnt, Fingerabdruck ist Pflicht, ein kaputtes

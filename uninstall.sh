@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Entfernt das TrueNAS-Status-Widget wieder.
 #
 # Entfernt: systemd-Timer und -Service, den installierten Prüfer, das

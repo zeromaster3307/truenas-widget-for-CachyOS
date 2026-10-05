@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Installiert das TrueNAS-Status-Widget für den AKTUELLEN Benutzer (kein root nötig).
 #
 # Was passiert:

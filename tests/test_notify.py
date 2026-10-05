@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Tests: Benachrichtigung genau einmal pro Ereignis."""
 
 import json

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # systemd-User-Service: führt den Prüfer EINMAL aus (wird vom Timer gestartet).
 # Platzhalter @...@ werden von install.sh ersetzt.
 [Unit]
