@@ -3,18 +3,23 @@
 #
 # Was passiert:
 #   1. Prüft, ob Python 3.11 oder neuer vorhanden ist.
-#   2. Kopiert den Prüfer nach ~/.local/share/truenas-widget/
-#   3. Legt ~/.config/truenas-widget/ an (Rechte 700) und kopiert die
-#      Beispiel-Konfiguration dorthin, falls noch keine config.toml existiert.
+#   2. Kopiert den Prüfer und den Einrichtungs-Assistenten nach
+#      ~/.local/share/truenas-widget/ und legt einen Eintrag im Anwendungsmenü
+#      an ("TrueNAS-Widget einrichten").
+#   3. Legt ~/.config/truenas-widget/ an (Rechte 700) mit config.toml (allgemeine
+#      Einstellungen), falls noch keine existiert. Eine config.toml im alten
+#      Format (Version 0.3) wird automatisch umgestellt (Sicherung bleibt liegen).
 #   4. Richtet den systemd-User-Timer ein (Intervall aus der Konfiguration).
 #   5. Installiert bzw. aktualisiert das Plasma-6-Widget (kpackagetool6).
 #
-# Der API-Key wird NICHT angefasst - den legen Sie selbst ab (siehe README).
+# API-Keys werden NICHT angefasst. TrueNAS-Systeme richtet man danach mit dem
+# Assistenten ein (Rechtsklick auf das Widget -> "TrueNAS hinzufügen/verwalten…").
 # Erneut ausführen ist gefahrlos (z. B. nach Änderung des Intervalls oder Update).
 set -eu
 
 REPO=$(cd "$(dirname "$0")" && pwd)
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/truenas-widget"
+APPSDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 UNITDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/truenas-widget"
 PLASMOID_ID="local.truenasstatus"
@@ -39,7 +44,28 @@ mkdir -p "$APPDIR"
 rm -rf "$APPDIR/truenas_widget"
 cp -r "$REPO/truenas_widget" "$APPDIR/"
 find "$APPDIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
-say "[2/5] Prüfer installiert nach $APPDIR"
+# Starter für den Einrichtungs-Assistenten. Das Widget ruft genau diese Datei
+# auf (ohne Parameter). Pfade werden hier fest eingetragen.
+cat > "$APPDIR/setup.sh" <<EOS
+#!/bin/sh
+# Startet den Einrichtungs-Assistenten des TrueNAS-Status-Widgets.
+# Angelegt von install.sh - Änderungen werden beim nächsten install.sh überschrieben.
+export PYTHONPATH="$APPDIR"
+exec "$PYTHON" -m truenas_widget.setup "\$@"
+EOS
+chmod 755 "$APPDIR/setup.sh"
+mkdir -p "$APPSDIR"
+cat > "$APPSDIR/truenas-widget-setup.desktop" <<EOS
+[Desktop Entry]
+Type=Application
+Name=TrueNAS-Widget einrichten
+Comment=TrueNAS-Systeme für das Status-Widget hinzufügen, ändern oder entfernen
+Exec=$APPDIR/setup.sh
+Icon=network-server
+Terminal=false
+Categories=System;Settings;
+EOS
+say "[2/5] Prüfer und Assistent installiert nach $APPDIR"
 
 # --- 3. Konfiguration ---
 mkdir -p "$CONFDIR"
@@ -47,16 +73,21 @@ chmod 700 "$CONFDIR"
 if [ ! -f "$CONFDIR/config.toml" ]; then
     cp "$REPO/config.example.toml" "$CONFDIR/config.toml"
     chmod 600 "$CONFDIR/config.toml"
-    say "[3/5] Beispiel-Konfiguration angelegt: $CONFDIR/config.toml  -> BITTE ANPASSEN"
+    say "[3/5] Allgemeine Einstellungen angelegt: $CONFDIR/config.toml"
+elif grep -q '^\[truenas\]' "$CONFDIR/config.toml"; then
+    say "[3/5] Konfiguration im alten Format gefunden - stelle auf mehrere Systeme um:"
+    PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.migrate
 else
     say "[3/5] Vorhandene Konfiguration bleibt unverändert: $CONFDIR/config.toml"
 fi
-if [ -f "$CONFDIR/api-key" ]; then
-    perms=$(stat -c '%a' "$CONFDIR/api-key")
+for keyfile in "$CONFDIR/api-key" "$CONFDIR"/keys/*; do
+    [ -f "$keyfile" ] || continue
+    perms=$(stat -c '%a' "$keyfile")
     if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
-        say "      WARNUNG: $CONFDIR/api-key hat Rechte $perms. Bitte: chmod 600 \"$CONFDIR/api-key\""
+        say "      WARNUNG: $keyfile hat Rechte $perms. Bitte: chmod 600 \"$keyfile\""
     fi
-fi
+done
+SYSTEMS=$(PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.config --count-systems 2>/dev/null || echo 0)
 
 # --- 4. systemd-Timer ---
 INTERVAL=$(PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.config --print-interval)
@@ -91,9 +122,14 @@ else
 fi
 
 say ""
-say "Fertig. Nächste Schritte (Details im README):"
-say "  - Konfiguration anpassen:     $CONFDIR/config.toml"
-say "  - API-Key ablegen:            $CONFDIR/api-key (Rechte 600)"
-say "  - Diagnose ausführen:         $REPO/diagnose.sh"
-say "  - Sofort einmal prüfen:       systemctl --user start truenas-widget.service"
-say "  - Widget hinzufügen:          Rechtsklick auf Panel/Desktop -> Widgets hinzufügen -> 'TrueNAS-Status'"
+if [ "$SYSTEMS" = "0" ]; then
+    say "Fertig. Jetzt noch ein TrueNAS einrichten:"
+    say "  - Widget hinzufügen:  Rechtsklick auf Panel/Desktop -> Widgets hinzufügen -> 'TrueNAS-Status'"
+    say "  - Dann Rechtsklick auf das Widget -> 'TrueNAS hinzufügen/verwalten…'"
+    say "    (oder Anwendungsmenü -> 'TrueNAS-Widget einrichten', oder: $REPO/setup.sh)"
+else
+    say "Fertig. Eingerichtete TrueNAS-Systeme: $SYSTEMS"
+    say "  - Systeme verwalten:  Rechtsklick auf das Widget -> 'TrueNAS hinzufügen/verwalten…'"
+    say "  - Diagnose:           $REPO/diagnose.sh"
+    say "  - Widget neu laden:   systemctl --user restart plasma-plasmashell.service"
+fi

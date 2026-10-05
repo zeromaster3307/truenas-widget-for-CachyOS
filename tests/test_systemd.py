@@ -98,5 +98,32 @@ class InstallScriptTests(unittest.TestCase):
         self.assertIn("OnCalendar=*-*-* *:00/30:00", timer)
 
 
+    def test_assistent_starter_und_menueeintrag(self):
+        proc = self.run_install()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        starter = self.home / ".local/share/truenas-widget/setup.sh"
+        self.assertTrue(os.access(starter, os.X_OK))
+        text = starter.read_text()
+        self.assertIn('exec "', text)
+        self.assertIn('-m truenas_widget.setup "$@"', text)
+        desktop = (self.home / ".local/share/applications/truenas-widget-setup.desktop").read_text()
+        self.assertIn(f"Exec={starter}", desktop)
+        self.assertIn("TrueNAS hinzufügen/verwalten", proc.stdout)  # Hinweis: noch kein System
+
+    def test_alte_konfiguration_wird_umgestellt(self):
+        cdir = self.home / ".config" / "truenas-widget"
+        cdir.mkdir(parents=True)
+        (cdir / "config.toml").write_text(
+            '[truenas]\nname = "homelab"\nhost = "192.168.1.20"\nport = 443\nusername = "u"\n'
+            'fingerprint_sha256 = "' + "ab" * 32 + '"\n[checker]\ninterval_minutes = 30\n')
+        proc = self.run_install()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertTrue((cdir / "systems" / "homelab.toml").exists())
+        self.assertTrue((cdir / "config.toml.v0.3.bak").exists())
+        self.assertIn("Eingerichtete TrueNAS-Systeme: 1", proc.stdout)
+        timer = (self.home / ".config/systemd/user/truenas-widget.timer").read_text()
+        self.assertIn("OnCalendar=*-*-* *:00/30:00", timer)   # Intervall übernommen
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@
 set -u
 
 APPDIR="${XDG_DATA_HOME:-$HOME/.local/share}/truenas-widget"
+APPSDIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 UNITDIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/truenas-widget"
 CACHEDIR="${XDG_CACHE_HOME:-$HOME/.cache}/truenas-widget"
@@ -23,7 +24,8 @@ systemctl --user daemon-reload 2>/dev/null
 echo "systemd-Timer entfernt."
 
 rm -rf "$APPDIR" "$CACHEDIR" "$STATEDIR"
-echo "Prüfer, status.json und Zustandsdatei entfernt."
+rm -f "$APPSDIR/truenas-widget-setup.desktop"
+echo "Prüfer, Assistent, status.json und Zustandsdateien entfernt."
 
 if command -v kpackagetool6 >/dev/null 2>&1; then
     kpackagetool6 -t Plasma/Applet -r "$PLASMOID_ID" >/dev/null 2>&1 && \
@@ -31,8 +33,8 @@ if command -v kpackagetool6 >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "Nicht gelöscht: $CONFDIR (Konfiguration und ggf. API-Key)."
+echo "Nicht gelöscht: $CONFDIR (Einstellungen, systems/ und API-Keys in keys/)."
 echo "Wenn Sie auch das entfernen wollen:"
 echo "  rm -r \"$CONFDIR\""
-echo "  secret-tool clear service truenas-widget account api-key   # falls KWallet/secret-tool benutzt"
-echo "Und den API-Key in TrueNAS widerrufen (siehe README)."
+echo "  secret-tool clear service truenas-widget   # falls KWallet/secret-tool benutzt"
+echo "Und die API-Keys auf den TrueNAS-Systemen löschen (My API Keys)."
