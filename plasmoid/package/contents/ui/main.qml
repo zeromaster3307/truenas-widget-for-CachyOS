@@ -322,9 +322,9 @@ PlasmoidItem {
                 }
             }
 
-            // Fussnote: Uhrzeit der letzten Prüfung, auf dem Desktop
-            // zusätzlich der Knopf "Aktualisieren" (im Panel-Popup nicht nötig,
-            // dort gibt es "Jetzt prüfen" im Rechtsklick-Menü).
+            // Fussnote: Uhrzeit der letzten Prüfung und Knopf "Aktualisieren"
+            // (auf dem Desktop und im aufgeklappten Panel-Popup gleich).
+            // Zusätzlich bleibt "Jetzt prüfen" im Rechtsklick-Menü.
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.smallSpacing
@@ -335,11 +335,10 @@ PlasmoidItem {
                     text: Logic.lastCheckText(root.st, root.nowMs)
                     font: Kirigami.Theme.smallFont
                     color: Kirigami.Theme.disabledTextColor
-                    horizontalAlignment: root.inPanel ? Text.AlignRight : Text.AlignLeft
+                    horizontalAlignment: Text.AlignLeft
                 }
                 // Liegt über der Klickfläche "Browser öffnen" und fängt den Klick selbst ab.
                 PlasmaComponents3.ToolButton {
-                    visible: !root.inPanel
                     icon.name: "view-refresh"
                     text: root.checking ? "Prüfe…" : "Aktualisieren"
                     enabled: !root.checking

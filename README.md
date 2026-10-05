@@ -59,7 +59,9 @@ Das Projekt besteht aus drei Teilen:
    - Im Panel: nur ein farbiger Kreis, beim Darüberfahren eine Kurzinfo.
      Ein Klick klappt die Details auf.
    - Auf dem Desktop: **immer direkt die Details**, egal wie gross das
-     Widget gezogen ist. Plus Knopf **„Aktualisieren“** unten rechts.
+     Widget gezogen ist.
+   - In den Details (Desktop und Panel-Popup) unten rechts der Knopf
+     **„Aktualisieren“**.
    - Details (Desktop bzw. aufgeklappt im Panel): farbiger Punkt, Name +
      Status. Ist alles in Ordnung, steht dort nur der Name und ein grünes
      „OK“. Sonst darunter nur das Relevante (App-Updates, Systemupdate, bis zu
@@ -384,8 +386,9 @@ Dienst. Den genauen Befehl finden Sie in
 ### Prüfung manuell anstossen („Jetzt prüfen“)
 
 **Rechtsklick auf das Widget** (im Panel oder auf dem Desktop) → **Jetzt
-prüfen**. Auf dem Desktop geht es auch über den Knopf **„Aktualisieren“**
-in der Detailansicht. Beides löst genau dasselbe aus.
+prüfen**. Oder über den Knopf **„Aktualisieren“** in der Detailansicht
+(auf dem Desktop und im aufgeklappten Panel-Popup). Beides löst genau
+dasselbe aus.
 
 - Es läuft genau dieselbe Prüfung wie beim Widget-Start: „Prüfe…“, danach
   das neue Ergebnis oder nach 150 s „Prüfung fehlgeschlagen“.

@@ -295,7 +295,7 @@ class ManualCheckQmlTests(unittest.TestCase):
 
 
 class DesktopViewQmlTests(unittest.TestCase):
-    """Desktop: immer Detailansicht + Knopf "Aktualisieren"; Panel: nur Icon."""
+    """Desktop: immer Detailansicht; Panel: Icon, Details per Klick; Knopf in beiden."""
 
     QML = ManualCheckQmlTests.QML
 
@@ -304,9 +304,10 @@ class DesktopViewQmlTests(unittest.TestCase):
         self.assertIn("switchWidth: inPanel ? Number.POSITIVE_INFINITY : 0", self.QML)
         self.assertIn("switchHeight: inPanel ? Number.POSITIVE_INFINITY : 0", self.QML)
 
-    def test_aktualisieren_knopf_nur_auf_dem_desktop(self):
+    def test_aktualisieren_knopf_ueberall_in_der_detailansicht(self):
         idx = self.QML.index("PlasmaComponents3.ToolButton {")
         button = self.QML[idx:self.QML.index("}", idx)]
-        self.assertIn("visible: !root.inPanel", button)
+        self.assertNotIn("visible:", button)  # Desktop UND Panel-Popup
+        self.assertIn("text: \"Jetzt prüfen\"", self.QML)  # Rechtsklick-Menü bleibt
         self.assertIn("onClicked: root.startCheck(true)", button)  # gleiche Prüfung wie "Jetzt prüfen"
         self.assertIn("enabled: !root.checking", button)
