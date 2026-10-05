@@ -13,8 +13,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from truenas_widget import checker, paths, setup
 from truenas_widget import config as c
-from truenas_widget import paths, setup
 
 from . import fixtures as fx
 from .helpers import KeyLeakTestCase
@@ -160,10 +160,68 @@ class AssistantTests(KeyLeakTestCase):
 
     def test_fehlende_rechte_trotzdem_speichern(self):
         with self.server(denied={"alert.list"}) as srv:
-            ui = ScriptedUI(self.add_script(srv.port) + [("yesno", True), ("info", None)])
+            ui = ScriptedUI(self.add_script(srv.port) + [("choose", "save"), ("info", None)])
             self.assistant(ui).run()
         self.assertIn("Readonly Admin", ui.all_text())
         self.assertTrue((paths.systems_dir() / "homelab.toml").exists())
+
+    def flaky_check(self, failures, reason):
+        """Prüfung, die zuerst <failures>-mal mit <reason> scheitert, dann echt prüft."""
+        seen = []
+
+        def check(cfg, secret):
+            seen.append(cfg.timeout_seconds)
+            if len(seen) <= failures:
+                return checker.offline_entry(cfg, "unreachable", reason)
+            return checker.check_system(cfg, secret)
+        return check, seen
+
+    def test_zeitueberschreitung_nochmal_testen(self):
+        reason = "Nicht erreichbar: Empfangen fehlgeschlagen (Zeitüberschreitung)."
+        with self.server() as srv:
+            ui = ScriptedUI(self.add_script(srv.port) + [("choose", "retry"), ("info", None), ("info", None)])
+            a = self.assistant(ui)
+            a.check, seen = self.flaky_check(1, reason)
+            a.run()
+        text = ui.all_text()
+        self.assertIn("nicht rechtzeitig geantwortet", text)
+        self.assertIn("Tailscale", text)
+        self.assertIn("Nochmal testen", text)
+        self.assertIn("Verbindung klappt", text)              # zweiter Versuch klappt
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(all(t >= setup.TEST_TIMEOUT for t in seen))  # längere Wartezeit beim Test
+        cfg = c.load_system(paths.systems_dir() / "homelab.toml")
+        self.assertEqual(cfg.timeout_seconds, 20)             # gespeichert wird der normale Wert
+
+    def test_keine_verbindung_trotzdem_speichern(self):
+        reason = "Nicht erreichbar: Keine Verbindung zu 127.0.0.1:443 (Zeitüberschreitung)."
+        with self.server() as srv:
+            ui = ScriptedUI(self.add_script(srv.port) + [("choose", "save"), ("info", None)])
+            a = self.assistant(ui)
+            a.check, _ = self.flaky_check(5, reason)
+            a.run()
+        self.assertIn("Es kam gar keine Verbindung zustande", ui.all_text())
+        self.assertTrue((paths.systems_dir() / "homelab.toml").exists())
+
+    def test_zeitueberschreitung_abbrechen_speichert_nichts(self):
+        reason = "Nicht erreichbar: Empfangen fehlgeschlagen (Zeitüberschreitung)."
+        with self.server() as srv:
+            ui = ScriptedUI(self.add_script(srv.port) + [("choose", setup.Cancelled())])
+            a = self.assistant(ui)
+            a.check, _ = self.flaky_check(5, reason)
+            a.run()
+        self.assertFalse((paths.systems_dir() / "homelab.toml").exists())
+        self.assertFalse((paths.keys_dir() / "homelab").exists())
+
+    def test_fingerabdruck_anleitung(self):
+        with self.server() as srv:
+            ui = ScriptedUI(self.add_script(srv.port)[:5] + [("yesno", False)])
+            self.assistant(ui).run()
+        text = ui.all_text()
+        for needle in ("System → Shell", "openssl x509 -in /etc/certificates/", "Firefox",
+                       "Fingerabdrücke", "Chrome", "Details", "JETZT vergleichen, bevor der API-Key gesendet wird",
+                       "neu prüfen"):
+            self.assertIn(needle, text)
 
     def test_nicht_erreichbar_abbrechen(self):
         with self.server() as srv:

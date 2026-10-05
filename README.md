@@ -12,7 +12,7 @@ Ihrem TrueNAS – oder mehreren – alles in Ordnung ist, oder ob es
 | 🔴 rot | kritische Meldung |
 | ⚪ grau | offline / nicht erreichbar / Daten veraltet / noch nicht eingerichtet |
 
-**Version 0.4.0.** Neu gegenüber 0.3: mehrere TrueNAS-Systeme in einem Widget,
+**Version 0.4.1.** Neu gegenüber 0.3: mehrere TrueNAS-Systeme in einem Widget,
 Einrichtungs-Assistent, „offline ignorieren“ pro System.
 
 **Annahmen** (bitte prüfen):
@@ -221,17 +221,27 @@ Der Assistent fragt nacheinander:
 2. **Adresse** (IP oder Name, z. B. `192.168.1.20` oder
    `nas.tailnet.ts.net`) – `http://` wird abgelehnt.
 3. **Port** (meist `443`).
-4. **Fingerabdruck:** zeigt den SHA-256-Fingerabdruck des Zertifikats und
-   öffnet auf Wunsch die TrueNAS-Seite im Browser zum Vergleichen
-   (Abschnitt 4). Erst nach Ihrem **„Ja, stimmt überein“** geht es weiter –
-   vorher wird nichts gesendet.
+4. **Fingerabdruck:** zeigt den SHA-256-Fingerabdruck des Zertifikats samt
+   Anleitung, wo Sie ihn vergleichen können (TrueNAS-Shell, Firefox, Chrome –
+   siehe Abschnitt 4), und öffnet auf Wunsch die TrueNAS-Seite im Browser.
+   Erst nach Ihrem **„Ja, stimmt überein“** geht es weiter – vorher wird
+   nichts gesendet.
 5. **Benutzername** auf dem TrueNAS (Vorgabe `widget-leser`).
 6. Auf Wunsch öffnet er die Seite **My API Keys** dieses TrueNAS.
 7. **Speicherort für den Key** (nur wenn `secret-tool` vorhanden ist):
    Datei (Standard) oder KDE-Passwortspeicher/KWallet.
 8. **API-Key** in einem verdeckten Feld.
-9. **Verbindungstest** (Anmeldung + die drei Lese-Abfragen). Bei falschem Key
-   können Sie ihn sofort neu eingeben; fehlen Rechte, sagt der Assistent das.
+9. **Verbindungstest** (Anmeldung + die drei Lese-Abfragen, mit bis zu 45 s
+   Wartezeit). Der Test benutzt denselben Code wie die regelmässige Prüfung –
+   er bringt keine zusätzliche Sicherheit, sondern sofortige Rückmeldung:
+   - **Falscher Key oder Benutzer:** Key gleich neu eingeben (gespeichert wird
+     so nicht).
+   - **Zeitüberschreitung / keine Verbindung:** Der Assistent sagt, ob gar
+     keine Verbindung zustande kam oder das TrueNAS nur zu langsam antwortete,
+     nennt mögliche Gründe (z. B. Tailscale) und bietet **„Nochmal testen“**
+     oder **„Trotzdem speichern“** an.
+   - **Fehlende Rechte:** Hinweis auf die Rolle „Readonly Admin“, dann
+     „Nochmal testen“ oder „Trotzdem speichern“.
 10. Speichert alles und stösst eine Prüfung an – das System erscheint nach
     wenigen Sekunden im Widget.
 
@@ -319,18 +329,41 @@ gesendet wird.
 ### Fingerabdruck vergleichen
 
 Der Assistent zeigt den Fingerabdruck an (Format `3F:A2:…:9C`, 32 Paare).
-**Bewusst vergleichen**, bevor Sie bestätigen:
+**Bewusst vergleichen**, bevor Sie bestätigen – ein Weg genügt:
 
-- Im Browser die TrueNAS-Seite öffnen (der Assistent bietet das an) → auf das
-  Schloss-/Warnsymbol links neben der Adresse klicken → Zertifikat anzeigen →
+- **A) Am sichersten – direkt auf dem TrueNAS** (unabhängig vom Netz):
+  TrueNAS-Oberfläche → **System → Shell** (als Ihr normaler Admin), dann:
+  ```sh
+  sudo openssl x509 -in /etc/certificates/truenas_default.crt -noout -fingerprint -sha256
+  ```
+  Der Ordner `/etc/certificates/` ist im TrueNAS-Quellcode belegt;
+  `truenas_default` ist der übliche Standardname (ungeprüft für Ihr System).
+  Bei einem eigenen Zertifikat zeigt `sudo ls /etc/certificates/` die Namen.
+- **B) Firefox:** TrueNAS-Seite öffnen (der Assistent bietet das an) →
+  Schloss-Symbol links neben der Adresse → „Verbindung nicht sicher“ →
+  „Weitere Informationen“ → „Zertifikat anzeigen“ → Abschnitt
+  **„Fingerabdrücke“ → SHA-256**.
+- **C) Chrome/Chromium/Brave:** Symbol links neben der Adresse → „Nicht
+  sicher“ / „Zertifikat ist ungültig“ → Reiter **„Details“** →
   **SHA-256-Fingerabdruck**.
-- Oder mit openssl:
+- Oder im Terminal Ihres PCs:
   ```sh
   openssl s_client -connect 192.168.1.20:443 </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256
   ```
 
-Beide Wege laufen über dasselbe Netz. Am sichersten ist der Vergleich zu
-Hause im eigenen LAN, wenn Sie sicher sind, dass niemand dazwischen sitzt.
+Gross-/Kleinschreibung und Doppelpunkte spielen keine Rolle. B, C und der
+Terminal-Befehl laufen über dasselbe Netz wie das Widget; im eigenen LAN oder
+über Tailscale ist das praktisch ebenso gut. Weg A ist der einzige, den
+niemand im Netz verfälschen kann.
+
+**Nachträglich vergleichen** (falls Sie einfach bestätigt haben): Ihre
+gespeicherten Werte zeigt
+```sh
+grep fingerprint ~/.config/truenas-widget/systems/*.toml
+```
+Mit A, B oder C vergleichen. Stimmt einer nicht, den API-Key dieses Systems
+auf dem TrueNAS unter **My API Keys** löschen, im Assistenten
+„Zertifikats-Fingerabdruck neu prüfen“ und einen neuen Key einrichten.
 
 Ohne Assistent: `./diagnose.sh --nur-fingerabdruck --host 192.168.1.20 --port 443`
 zeigt den Wert ebenfalls an (es wird dabei nichts gesendet).
@@ -483,6 +516,8 @@ und darf weitergegeben werden.
 | Anzeige / Meldung | Ursache | Lösung |
 |---|---|---|
 | Grau, „Nicht eingerichtet“ | Noch kein TrueNAS eingerichtet | Knopf „Einrichten…“ oder Rechtsklick → „TrueNAS hinzufügen/verwalten…“ |
+| Assistent: „Zeitüberschreitung“ beim Test | TrueNAS antwortet zu langsam oder Tailscale-Verbindung noch im Aufbau | „Nochmal testen“; Einstellungen sind meist richtig |
+| Assistent: „Es kam gar keine Verbindung zustande“ | Adresse/Port falsch, TrueNAS aus, Tailscale aus | Adresse prüfen, `tailscale status`, dann „Nochmal testen“ |
 | Nichts passiert bei „TrueNAS hinzufügen/verwalten…“ | Starter fehlt (altes install.sh) oder kdialog fehlt | `./install.sh` erneut; `kdialog --version`; notfalls `./setup.sh --terminal` |
 | System grau, „Nicht erreichbar“ | Anderes Netz, TrueNAS aus, Tailscale aus, falsche Adresse/Port | Im Browser `https://<host>:<port>` öffnen; Adresse im Assistenten prüfen |
 | Panel orange, ein System „Offline“ | Dieses System fehlt seit mindestens 2 Prüfungen, ein anderes antwortet | Ursache wie oben – oder bewusst: Rechtsklick → „<name>: offline ignorieren“ |

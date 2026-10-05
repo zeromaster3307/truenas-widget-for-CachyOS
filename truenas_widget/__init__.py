@@ -12,4 +12,4 @@ Dieses Paket enthält:
 - migrate.py    : einmalige Umstellung der Konfiguration von Version 0.3
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"

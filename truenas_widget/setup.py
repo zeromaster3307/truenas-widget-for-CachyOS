@@ -24,6 +24,7 @@ Sicherheit:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fcntl
 import getpass
 import logging
@@ -31,6 +32,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import __version__, checker, keystore, paths
@@ -39,6 +41,29 @@ from .wsclient import ConnectError, fetch_fingerprint
 
 TITLE = "TrueNAS-Widget einrichten"
 FP_TIMEOUT = 15.0
+# Beim Verbindungstest grosszügiger warten als bei der regelmässigen Prüfung:
+# der erste Kontakt (z. B. über Tailscale) oder die erste Update-Abfrage auf
+# dem TrueNAS kann deutlich länger dauern als spätere.
+TEST_TIMEOUT = 45.0
+
+# Anleitung zum Vergleichen des Fingerabdrucks.
+# Pfad /etc/certificates/<name>.crt belegt im TrueNAS-Quellcode 25.10.7
+# (plugins/crypto_/utils.py: CERT_ROOT_PATH, query_utils.py).
+# "truenas_default" ist der übliche Standardname - UNGEPRÜFT für jedes System.
+FINGERPRINT_HELP = (
+    "So vergleichen Sie (ein Weg genügt):\n\n"
+    "A) Am sichersten - direkt auf dem TrueNAS:\n"
+    "   TrueNAS-Oberfläche → System → Shell, dann eingeben:\n"
+    "   sudo openssl x509 -in /etc/certificates/truenas_default.crt -noout -fingerprint -sha256\n"
+    "   (Anderes Zertifikat? Namen zeigt: sudo ls /etc/certificates/)\n\n"
+    "B) Firefox: TrueNAS-Seite öffnen → Schloss-Symbol links neben der Adresse →\n"
+    "   \"Verbindung nicht sicher\" → \"Weitere Informationen\" → \"Zertifikat anzeigen\"\n"
+    "   → Abschnitt \"Fingerabdrücke\" → SHA-256\n\n"
+    "C) Chrome/Chromium/Brave: Symbol links neben der Adresse → \"Nicht sicher\" /\n"
+    "   \"Zertifikat ist ungültig\" → Reiter \"Details\" → SHA-256-Fingerabdruck\n\n"
+    "Gross-/Kleinschreibung und Doppelpunkte spielen keine Rolle. Am besten alle\n"
+    "Zeichen vergleichen, mindestens aber Anfang, Mitte und Ende genau."
+)
 
 
 class Cancelled(Exception):
@@ -210,7 +235,8 @@ PREPARE_TEXT = (
 class Assistant:
     def __init__(self, ui, *, fetch_fp=fetch_fingerprint, check=checker.check_system,
                  opener=open_url, starter=start_check, has_secret_tool=secret_tool_available,
-                 store_secret=store_secret_tool, clear_secret=clear_secret_tool):
+                 store_secret=store_secret_tool, clear_secret=clear_secret_tool,
+                 clock=time.monotonic):
         self.ui = ui
         self.fetch_fp = fetch_fp
         self.check = check
@@ -219,6 +245,7 @@ class Assistant:
         self.has_secret_tool = has_secret_tool
         self.store_secret = store_secret
         self.clear_secret = clear_secret
+        self.clock = clock
 
     # ---------- Hauptmenü ----------
     def run(self) -> int:
@@ -297,15 +324,19 @@ class Assistant:
         intro = ("Der Fingerabdruck hat sich GEÄNDERT.\n\nBisher:\n" + c.format_fingerprint(old)
                  + "\n\nJetzt:\n") if old else "SHA-256-Fingerabdruck des TrueNAS-Zertifikats:\n\n"
         text = (intro + c.format_fingerprint(fp) + "\n\n"
-                "Bitte vergleichen: TrueNAS-Seite im Browser öffnen → Schloss-/Warnsymbol neben "
-                "der Adresse → Zertifikat anzeigen → SHA-256-Fingerabdruck.\n\n"
-                "Soll ich die Seite jetzt im Browser öffnen?")
+                "Bitte JETZT vergleichen, bevor der API-Key gesendet wird. Nur so ist sicher,\n"
+                "dass Sie mit Ihrem TrueNAS sprechen und nicht mit einem anderen Gerät.\n\n"
+                + FINGERPRINT_HELP + "\n\n"
+                "Soll ich die TrueNAS-Seite jetzt im Browser öffnen (für A, B oder C)?")
         if self.ui.yesno(text, "Im Browser öffnen", "Nicht nötig"):
             self.opener(f"https://{host}:{port}/")
-        if not self.ui.yesno("Stimmt der Fingerabdruck EXAKT mit dem im Browser überein?\n\n"
+        if not self.ui.yesno("Stimmt dieser Fingerabdruck EXAKT mit dem auf dem TrueNAS bzw.\n"
+                             "im Browser überein?\n\n"
                              + c.format_fingerprint(fp) + "\n\n"
-                             "Nur bestätigen, wenn Sie sicher sind. Sonst könnte sich ein "
-                             "anderes Gerät als TrueNAS ausgeben.",
+                             "Nur bestätigen, wenn Sie wirklich verglichen haben. Sonst könnte\n"
+                             "sich ein anderes Gerät als TrueNAS ausgeben und den Key erhalten.\n"
+                             "Nachträglich vergleichen geht jederzeit über \"Zertifikats-\n"
+                             "Fingerabdruck neu prüfen\" in diesem Assistenten.",
                              "Ja, stimmt überein", "Nein, abbrechen"):
             raise Cancelled()
         return fp
@@ -320,29 +351,63 @@ class Assistant:
             self.ui.error("Das sieht nicht nach einem API-Key aus (leer oder mit Leerzeichen).")
 
     def _test(self, cfg, secret) -> bool:
-        """Testet die Verbindung. True = speichern, False = Key nochmal eingeben."""
-        entry = self.check(cfg, secret)
-        kind = entry.get("offline_kind")
-        reason = secret.redact(entry.get("offline_reason") or "")
-        if entry["status"] != "offline":
-            self.ui.info(f"Verbindung klappt.\nAktueller Status von \"{cfg.name}\": "
-                         f"{entry['status_text']}.")
-            return True
-        if kind == "auth":
-            if self.ui.yesno(f"Anmeldung fehlgeschlagen:\n{reason}\n\n"
-                             "Benutzername und Key prüfen. Key nochmal eingeben?",
-                             "Key nochmal eingeben", "Abbrechen"):
-                return False
-            raise Cancelled()
+        """Testet die Verbindung. True = speichern, False = Key nochmal eingeben.
+
+        Benutzt denselben Code wie die regelmässige Prüfung (gleiche Whitelist),
+        aber mit längerer Wartezeit. Bei Zeitüberschreitung oder Netzproblemen
+        kann man es nochmal versuchen oder trotzdem speichern; bei falschem Key
+        oder Benutzer wird NICHT gespeichert.
+        """
+        test_cfg = dataclasses.replace(cfg, timeout_seconds=max(cfg.timeout_seconds, TEST_TIMEOUT))
+        while True:
+            started = self.clock()
+            entry = self.check(test_cfg, secret)
+            seconds = max(0, round(self.clock() - started))
+            kind = entry.get("offline_kind")
+            reason = secret.redact(entry.get("offline_reason") or "")
+            if entry["status"] != "offline":
+                self.ui.info(f"Verbindung klappt.\nAktueller Status von \"{cfg.name}\": "
+                             f"{entry['status_text']}.")
+                return True
+            if kind == "auth":
+                if self.ui.yesno(f"Anmeldung fehlgeschlagen:\n{reason}\n\n"
+                                 "Benutzername und Key prüfen. Key nochmal eingeben?",
+                                 "Key nochmal eingeben", "Abbrechen"):
+                    return False
+                raise Cancelled()
+            text = self._failure_text(kind, reason, entry, seconds)
+            choice = self.ui.choose(text, [("retry", "Nochmal testen"),
+                                           ("save", "Trotzdem speichern")])
+            if choice == "save":
+                return True
+            # "retry": Schleife, gleicher Key, neuer Versuch
+
+    @staticmethod
+    def _failure_text(kind, reason, entry, seconds) -> str:
         if kind == "incomplete":
-            text = (f"Die Anmeldung klappt, aber nicht alle Abfragen sind erlaubt:\n"
+            return ("Die Anmeldung klappt, aber nicht alle Abfragen sind erlaubt:\n"
                     + "\n".join(entry.get("problems", []))
-                    + "\n\nHat der Benutzer die Rolle \"Readonly Admin\"?\n\nTrotzdem speichern?")
-        else:
-            text = f"Test nicht erfolgreich:\n{reason}\n\nTrotzdem speichern?"
-        if self.ui.yesno(text, "Trotzdem speichern", "Abbrechen"):
-            return True
-        raise Cancelled()
+                    + "\n\nHat der Benutzer die Rolle \"Readonly Admin\"? Rolle auf dem "
+                      "TrueNAS korrigieren und dann \"Nochmal testen\".")
+        if kind == "unreachable" and "Zeitüberschreitung" in reason:
+            if reason.startswith("Nicht erreichbar: Keine Verbindung"):
+                what = "Es kam gar keine Verbindung zustande"
+            else:
+                what = "Die Verbindung steht, aber das TrueNAS hat nicht rechtzeitig geantwortet"
+            return (f"{what} (Zeitüberschreitung nach {seconds} Sekunden).\n\n"
+                    "Mögliche Gründe:\n"
+                    "- Remote-System: Läuft Tailscale auf diesem PC und auf dem TrueNAS?\n"
+                    "- Der erste Kontakt über Tailscale dauert manchmal länger.\n"
+                    "- Das TrueNAS ist gerade stark beschäftigt oder fragt beim ersten\n"
+                    "  Mal den Update-Server ab.\n\n"
+                    "Meist hilft \"Nochmal testen\". Die Einstellungen selbst sind\n"
+                    "vermutlich richtig - Sie können auch trotzdem speichern.\n\n"
+                    f"Technische Meldung: {reason}")
+        if kind == "unreachable":
+            return (f"Keine Verbindung zum TrueNAS:\n{reason}\n\n"
+                    "Adresse und Port richtig? TrueNAS an? Bei einem Remote-System:\n"
+                    "läuft Tailscale?")
+        return f"Test nicht erfolgreich:\n{reason}"
 
     def _ask_storage(self) -> str:
         if not self.has_secret_tool():
