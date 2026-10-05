@@ -145,7 +145,9 @@ class IntegrationTests(KeyLeakTestCase):
         nas = status["systems"][0]
         self.assertEqual(nas["name"], "Test-NAS")
         self.assertTrue(nas["system_update"]["available"])
-        self.assertEqual(len(sent), 2)  # Warnung + Systemupdate
+        # Warnung + Systemupdate + Zertifikat läuft bald ab (Test-Zertifikat gilt 1 Tag)
+        self.assertEqual(len(sent), 3)
+        self.assertIn("Test-NAS: Zertifikat läuft bald ab", [t for _, t, _ in sent])
         for text in (status_text, stderr.getvalue(), stdout.getvalue(), diag_out.getvalue()):
             self.assertNotIn(TEST_KEY, text)
         d = diag_out.getvalue()

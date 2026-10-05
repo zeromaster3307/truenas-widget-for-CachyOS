@@ -113,5 +113,93 @@ class NotifyOnceTests(unittest.TestCase):
         self.assertEqual(len(self.sent), 2, "Nach Rückkehr darf nichts erneut gemeldet werden")
 
 
+
+class PersistentProblemTests(unittest.TestCase):
+    """Probleme, die nicht von selbst verschwinden: genau einmal melden."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name) / "notified.json"
+        self.sent = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_entries(self, *entries, enabled=True):
+        status = checker.build_status(make_app(), list(entries), now=1)
+        notify.process(status, self.state, enabled, sender=lambda *m: self.sent.append(m))
+
+    def offline(self, kind, sid="remote", reason="Anmeldung fehlgeschlagen (EXPIRED): abgelaufen"):
+        return checker.offline_entry(make_cfg(system_id=sid, name=sid), kind, reason)
+
+    def ok(self, sid="remote", cert_days=None, expires="2026-12-31"):
+        """System ok; Zertifikat läuft am festen Datum <expires> ab, "jetzt" liegt
+        <cert_days> Tage davor (so wie in Wirklichkeit die Zeit vergeht)."""
+        raw = {"alerts": [], "apps": [], "system": fx.update_status(), "denied": []}
+        e = checker.build_entry(make_cfg(system_id=sid, name=sid), raw)
+        if cert_days is not None:
+            from datetime import datetime, timedelta, timezone
+            not_after = datetime.fromisoformat(expires).replace(tzinfo=timezone.utc)
+            checker.apply_cert_expiry(e, not_after, not_after - timedelta(days=cert_days, hours=-1))
+        return e
+
+    def titles(self):
+        return [t for _, t, _ in self.sent]
+
+    def test_key_abgelaufen_einmal(self):
+        for _ in range(3):
+            self.run_entries(self.offline("auth"))
+        self.assertEqual(self.titles(), ["remote: Anmeldung fehlgeschlagen"])
+        self.assertIn("API-Key erneuern", self.sent[0][2])
+
+    def test_wieder_ok_dann_erneut_problem_meldet_neu(self):
+        self.run_entries(self.offline("auth"))
+        self.run_entries(self.ok())
+        self.run_entries(self.offline("auth"))
+        self.assertEqual(len(self.sent), 2)
+
+    def test_zwischendurch_nicht_erreichbar_meldet_nicht_doppelt(self):
+        self.run_entries(self.offline("auth"))
+        self.run_entries(self.offline("unreachable", reason="Nicht erreichbar"))
+        self.run_entries(self.offline("auth"))
+        self.assertEqual(len(self.sent), 1)
+
+    def test_nicht_erreichbar_und_fingerabdruck_melden_nichts(self):
+        for kind in ("unreachable", "fingerprint", "error"):
+            self.run_entries(self.offline(kind, reason="x"))
+        self.assertEqual(self.sent, [])
+
+    def test_key_nicht_lesbar_und_konfigurationsfehler(self):
+        self.run_entries(self.offline("key", "a", "API-Key nicht lesbar"),
+                         self.offline("config", "b", "Konfigurationsfehler: host fehlt"))
+        self.assertEqual(sorted(self.titles()), ["a: API-Key nicht lesbar", "b: Konfigurationsfehler"])
+
+    def test_fehlende_rechte_einmal(self):
+        raw = {"alerts": None, "apps": [], "system": fx.update_status(), "denied": [("alerts", "alert.list")]}
+        e = checker.build_entry(make_cfg(system_id="remote", name="remote"), raw)
+        self.run_entries(e)
+        self.run_entries(e)
+        self.assertEqual(self.titles(), ["remote: Zugriff verweigert"])
+        self.assertIn("Readonly Admin", self.sent[0][2])
+
+    def test_zertifikat_bald_dann_abgelaufen(self):
+        self.run_entries(self.ok(cert_days=200))   # noch lange gültig: nichts
+        self.assertEqual(self.sent, [])
+        self.run_entries(self.ok(cert_days=20))
+        self.run_entries(self.ok(cert_days=19))
+        self.assertEqual(self.titles(), ["remote: Zertifikat läuft bald ab"])
+        self.run_entries(self.ok(cert_days=-1))
+        self.assertEqual(self.titles(), ["remote: Zertifikat läuft bald ab", "remote: Zertifikat abgelaufen"])
+        # Zertifikat erneuert (neues Datum, lange gültig): Hinweis weg; später wieder einmal
+        self.run_entries(self.ok(cert_days=365, expires="2027-12-31"))
+        self.run_entries(self.ok(cert_days=10, expires="2027-12-31"))
+        self.assertEqual(len(self.sent), 3)
+
+    def test_abgeschaltet(self):
+        self.run_entries(self.offline("auth"), enabled=False)
+        self.run_entries(self.offline("auth"))
+        self.assertEqual(self.sent, [])  # gemerkt, aber nicht gemeldet und nicht nachgeholt
+
+
 if __name__ == "__main__":
     unittest.main()

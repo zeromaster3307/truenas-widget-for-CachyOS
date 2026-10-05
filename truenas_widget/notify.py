@@ -3,16 +3,22 @@
 Was als "schon gemeldet" gilt, steht in der Zustandsdatei
 ~/.local/state/truenas-widget/notified.json, je System mit "<id>:" davor:
     {"alerts": ["homelab:<Alert-ID>"], "apps": ["homelab:app@version"],
-     "system": ["homelab:version"]}
+     "system": ["homelab:version"], "problems": ["remote:auth"]}
 
-Ablauf bei jeder erfolgreichen Prüfung:
-  1. Aktuelle Ereignisse ermitteln (Alerts ab WARNING, App-Updates, Systemupdate).
+Gemeldet wird (je einmal):
+  - neue Alerts ab WARNING, neue App-Updates, ein neues Systemupdate,
+  - Probleme, die nicht von selbst verschwinden: Anmeldung fehlgeschlagen
+    (Key abgelaufen/widerrufen), Key nicht lesbar, Konfigurationsfehler,
+    fehlende Rechte, Zertifikat läuft bald ab bzw. ist abgelaufen.
+
+Ablauf bei jeder Prüfung:
+  1. Aktuelle Ereignisse ermitteln.
   2. Alles, was noch nicht in der Zustandsdatei steht, ist NEU -> Benachrichtigung.
   3. Zustandsdatei auf den aktuellen Stand setzen. Verschwundene Einträge
      fliegen dabei raus (ein später wieder auftretendes Ereignis würde dann
      erneut gemeldet - das ist gewollt).
-Ist TrueNAS nicht erreichbar, wird die Zustandsdatei NICHT verändert und
-es gibt keine Benachrichtigung.
+Ist ein System nicht erreichbar (oder stimmt der Fingerabdruck nicht), wird
+für dieses System nichts gemeldet und nichts vergessen.
 """
 
 from __future__ import annotations
@@ -64,7 +70,12 @@ def write_json_atomic(path: Path, data) -> None:
         raise
 
 
-SECTIONS = ("alerts", "apps", "system")
+SECTIONS = ("alerts", "apps", "system", "problems")
+
+# Probleme, die nicht von selbst verschwinden -> EINMAL melden.
+# ("nicht erreichbar", falscher Fingerabdruck usw. melden bewusst nichts.)
+PERSISTENT_KINDS = ("auth", "key", "config")
+CERT_WARN_DAYS = 30  # wie checker.CERT_WARN_DAYS
 
 
 def _app_key(a: dict) -> str:
@@ -86,6 +97,21 @@ def event_keys(entry: dict) -> dict:
     su = entry.get("system_update") or {}
     if su.get("available"):
         keys["system"].add(p + str(su.get("new_version") or "?"))
+    keys["problems"] = problem_keys(entry)
+    return keys
+
+
+def problem_keys(entry: dict) -> set:
+    """Schlüssel für Probleme, die man selbst beheben muss (je einmal melden)."""
+    p = entry["id"] + ":"
+    keys = set()
+    if entry.get("status") == "offline" and entry.get("offline_kind") in PERSISTENT_KINDS:
+        keys.add(p + entry["offline_kind"])
+    if entry.get("incomplete"):
+        keys.add(p + "incomplete")
+    days = entry.get("cert_days_left")
+    if days is not None and days <= CERT_WARN_DAYS:
+        keys.add(p + ("cert-expired:" if days < 0 else "cert-soon:") + str(entry.get("cert_expires")))
     return keys
 
 
@@ -112,6 +138,25 @@ def build_messages(entry: dict, new: dict) -> list[tuple[str, str, str]]:
         su = entry.get("system_update") or {}
         messages.append(("normal", f"{name}: Systemupdate verfügbar",
                          f'Neue Version: {su.get("new_version") or "unbekannt"}'))
+    for key in sorted(new.get("problems", ())):
+        kind = key[len(p):].split(":", 1)[0]
+        reason = entry.get("offline_reason") or ""
+        if kind == "auth":
+            messages.append(("normal", f"{name}: Anmeldung fehlgeschlagen",
+                             f"{reason}\nAPI-Key abgelaufen oder widerrufen? Rechtsklick auf das Widget "
+                             "→ \"TrueNAS hinzufügen/verwalten…\" → \"API-Key erneuern\"."))
+        elif kind == "key":
+            messages.append(("normal", f"{name}: API-Key nicht lesbar",
+                             f"{reason}\nIm Assistenten \"API-Key erneuern\"."))
+        elif kind == "config":
+            messages.append(("normal", f"{name}: Konfigurationsfehler", reason))
+        elif kind == "incomplete":
+            messages.append(("normal", f"{name}: Zugriff verweigert",
+                             "\n".join(entry.get("problems", []))
+                             + "\nRolle \"Readonly Admin\" des TrueNAS-Benutzers prüfen."))
+        elif kind in ("cert-soon", "cert-expired"):
+            title = "Zertifikat abgelaufen" if kind == "cert-expired" else "Zertifikat läuft bald ab"
+            messages.append(("normal", f"{name}: {title}", "\n".join(entry.get("notices", []))))
     return messages
 
 
@@ -146,8 +191,16 @@ def process(status: dict, state_path: Path, enabled: bool, sender=None) -> list:
         prefix = entry["id"] + ":"
         mine_old = {k: {x for x in old.get(k, set()) if x.startswith(prefix)} for k in SECTIONS}
         if entry.get("status") == "offline":
+            # Offline: nichts vergessen. Gemeldet wird höchstens ein Problem,
+            # das nicht von selbst verschwindet (z. B. Key abgelaufen).
+            keys = {k: set(mine_old[k]) for k in SECTIONS}
+            if entry.get("offline_kind") in PERSISTENT_KINDS or entry.get("incomplete"):
+                keys["problems"] = problem_keys(entry)
+            new = {k: keys[k] - mine_old[k] for k in SECTIONS}
+            if any(new.values()):
+                messages += build_messages(entry, new)
             for k in SECTIONS:
-                current[k] |= mine_old[k]  # nichts vergessen, nichts melden
+                current[k] |= keys[k]
             continue
         keys = event_keys(entry)
         new = {k: keys[k] - mine_old[k] for k in SECTIONS}

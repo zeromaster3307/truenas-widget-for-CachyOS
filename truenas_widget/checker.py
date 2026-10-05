@@ -228,8 +228,9 @@ def build_entry(cfg, raw: dict) -> dict:
     return entry
 
 
-# Ab so vielen Tagen vor Ablauf des TrueNAS-Zertifikats erscheint ein Hinweis.
-CERT_WARN_DAYS = 30
+# Ab so vielen Tagen vor Ablauf des TrueNAS-Zertifikats erscheint ein Hinweis
+# (eine Stelle für Prüfer, Benachrichtigung und Diagnose).
+CERT_WARN_DAYS = notify.CERT_WARN_DAYS
 
 
 def apply_cert_expiry(entry: dict, not_after, now: datetime | None = None) -> None:
