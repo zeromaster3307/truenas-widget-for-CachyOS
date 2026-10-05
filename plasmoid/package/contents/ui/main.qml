@@ -58,9 +58,16 @@ PlasmoidItem {
                     + (checkFailed ? "Prüfung fehlgeschlagen.\n" : "")
                     + Logic.tooltip(st, eff) + "\n" + Logic.lastCheckText(st, nowMs)
 
-    // Auf dem Desktop (genug Platz) Vollansicht, im Panel nur das Icon.
-    switchWidth: Kirigami.Units.gridUnit * 10
-    switchHeight: Kirigami.Units.gridUnit * 3
+    // Im Panel nur das Icon (Details per Klick), auf dem Desktop IMMER direkt
+    // die Detailansicht - unabhängig von der Grösse des Widgets.
+    // Muster aus dem KDE-Webbrowser-Widget (kdeplasma-addons, Plasma 6.4):
+    // Panel erkennt man an Plasmoid.location (Bildschirmrand).
+    readonly property bool inPanel: [PlasmaCore.Types.TopEdge, PlasmaCore.Types.RightEdge,
+                                     PlasmaCore.Types.BottomEdge, PlasmaCore.Types.LeftEdge]
+                                    .includes(Plasmoid.location)
+    preferredRepresentation: inPanel ? compactRepresentation : fullRepresentation
+    switchWidth: inPanel ? Number.POSITIVE_INFINITY : 0
+    switchHeight: inPanel ? Number.POSITIVE_INFINITY : 0
 
     function applyStatus(parsed) {
         root.nowMs = Date.now();
@@ -315,14 +322,29 @@ PlasmoidItem {
                 }
             }
 
-            // Fussnote: Uhrzeit der letzten Prüfung
-            PlasmaComponents3.Label {
+            // Fussnote: Uhrzeit der letzten Prüfung, auf dem Desktop
+            // zusätzlich der Knopf "Aktualisieren" (im Panel-Popup nicht nötig,
+            // dort gibt es "Jetzt prüfen" im Rechtsklick-Menü).
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.smallSpacing
-                text: Logic.lastCheckText(root.st, root.nowMs)
-                font: Kirigami.Theme.smallFont
-                color: Kirigami.Theme.disabledTextColor
-                horizontalAlignment: Text.AlignRight
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents3.Label {
+                    Layout.fillWidth: true
+                    text: Logic.lastCheckText(root.st, root.nowMs)
+                    font: Kirigami.Theme.smallFont
+                    color: Kirigami.Theme.disabledTextColor
+                    horizontalAlignment: root.inPanel ? Text.AlignRight : Text.AlignLeft
+                }
+                // Liegt über der Klickfläche "Browser öffnen" und fängt den Klick selbst ab.
+                PlasmaComponents3.ToolButton {
+                    visible: !root.inPanel
+                    icon.name: "view-refresh"
+                    text: root.checking ? "Prüfe…" : "Aktualisieren"
+                    enabled: !root.checking
+                    onClicked: root.startCheck(true)
+                }
             }
         }
     }

@@ -57,11 +57,16 @@ Das Projekt besteht aus drei Teilen:
 2. **Plasma-Widget.** Liest nur diese Datei. Es spricht **nie** selbst mit
    TrueNAS und kennt den API-Key nicht.
    - Im Panel: nur ein farbiger Kreis, beim Darüberfahren eine Kurzinfo.
-   - Auf dem Desktop bzw. aufgeklappt: Name + Status. Ist alles in Ordnung,
-     steht dort nur der Name und ein grünes „OK“. Sonst darunter nur das
-     Relevante (App-Updates, Systemupdate, bis zu 5 Warnungen, dann
-     „+ n weitere“). Unten klein die Uhrzeit der letzten Prüfung.
-   - Ein Klick öffnet die TrueNAS-Oberfläche im Browser.
+     Ein Klick klappt die Details auf.
+   - Auf dem Desktop: **immer direkt die Details**, egal wie gross das
+     Widget gezogen ist. Plus Knopf **„Aktualisieren“** unten rechts.
+   - Details (Desktop bzw. aufgeklappt im Panel): farbiger Punkt, Name +
+     Status. Ist alles in Ordnung, steht dort nur der Name und ein grünes
+     „OK“. Sonst darunter nur das Relevante (App-Updates, Systemupdate, bis zu
+     5 Warnungen, dann „+ n weitere“). Unten klein die Uhrzeit der letzten
+     Prüfung.
+   - Ein Klick auf die Details (ausser auf den Knopf) öffnet die
+     TrueNAS-Oberfläche im Browser.
    - Ist die Datei älter als 45 Minuten, zeigt das Widget grau „Veraltet“.
    - **Beim Start** (z. B. nach dem Anmelden) prüft das Widget einmal, ob
      `status.json` fehlt oder älter als das Prüfintervall ist. Nur dann
@@ -379,7 +384,8 @@ Dienst. Den genauen Befehl finden Sie in
 ### Prüfung manuell anstossen („Jetzt prüfen“)
 
 **Rechtsklick auf das Widget** (im Panel oder auf dem Desktop) → **Jetzt
-prüfen**.
+prüfen**. Auf dem Desktop geht es auch über den Knopf **„Aktualisieren“**
+in der Detailansicht. Beides löst genau dasselbe aus.
 
 - Es läuft genau dieselbe Prüfung wie beim Widget-Start: „Prüfe…“, danach
   das neue Ergebnis oder nach 150 s „Prüfung fehlgeschlagen“.

@@ -292,3 +292,21 @@ class ManualCheckQmlTests(unittest.TestCase):
         self.assertNotIn("systemctl", code)
         self.assertEqual(code.count("trigger.connectSource("), 1)
         self.assertIn("trigger.connectSource(Logic.triggerCommand())", code)
+
+
+class DesktopViewQmlTests(unittest.TestCase):
+    """Desktop: immer Detailansicht + Knopf "Aktualisieren"; Panel: nur Icon."""
+
+    QML = ManualCheckQmlTests.QML
+
+    def test_desktop_immer_detailansicht(self):
+        self.assertIn("preferredRepresentation: inPanel ? compactRepresentation : fullRepresentation", self.QML)
+        self.assertIn("switchWidth: inPanel ? Number.POSITIVE_INFINITY : 0", self.QML)
+        self.assertIn("switchHeight: inPanel ? Number.POSITIVE_INFINITY : 0", self.QML)
+
+    def test_aktualisieren_knopf_nur_auf_dem_desktop(self):
+        idx = self.QML.index("PlasmaComponents3.ToolButton {")
+        button = self.QML[idx:self.QML.index("}", idx)]
+        self.assertIn("visible: !root.inPanel", button)
+        self.assertIn("onClicked: root.startCheck(true)", button)  # gleiche Prüfung wie "Jetzt prüfen"
+        self.assertIn("enabled: !root.checking", button)
