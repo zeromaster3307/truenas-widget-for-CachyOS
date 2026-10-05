@@ -1,7 +1,7 @@
 """Diagnose-Skript (nur lesend).
 
-Prüft Schritt für Schritt:
-  1. Konfiguration lesbar?
+Prüft Schritt für Schritt (für jedes eingerichtete System):
+  1. Konfiguration lesbar? (config.toml + systems/*.toml)
   2. TrueNAS erreichbar? Welcher Zertifikats-Fingerabdruck? Stimmt er?
   3. API-Key lesbar, Rechte der Key-Datei in Ordnung?
   4. Anmeldung klappt?
@@ -11,12 +11,14 @@ Prüft Schritt für Schritt:
   6. Selbsttest der Whitelist (eine Schreibmethode muss verweigert werden).
 
 Die Ausgabe enthält keinen Key, keine Adresse und keinen Benutzernamen
-und kann daher zum Abgleich weitergegeben werden.
+(nur die Kennungen der Systeme, z. B. "homelab") und kann daher zum
+Abgleich weitergegeben werden.
 
 Aufruf:
-  ./diagnose.sh                       vollständige Diagnose
-  ./diagnose.sh --nur-fingerabdruck   nur den Fingerabdruck anzeigen (sendet nichts)
-  ./diagnose.sh --nur-fingerabdruck --host 192.168.1.20 --port 5443
+  ./diagnose.sh                       vollständige Diagnose aller Systeme
+  ./diagnose.sh --system remote       nur ein System (Kennung = Dateiname in systems/)
+  ./diagnose.sh --nur-fingerabdruck --system remote   nur den Fingerabdruck (sendet nichts)
+  ./diagnose.sh --nur-fingerabdruck --host 192.168.1.20 --port 443
 """
 
 from __future__ import annotations
