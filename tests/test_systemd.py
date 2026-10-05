@@ -36,8 +36,7 @@ class TimerFileTests(unittest.TestCase):
         for bad in (0, 7, 45, 90, 1441):
             with self.subTest(bad=bad):
                 with self.assertRaises(c.ConfigError) as ctx:
-                    c.from_dict({"truenas": {"host": "192.168.1.20"},
-                                 "checker": {"interval_minutes": bad}}, require_fingerprint=False)
+                    c.global_from_dict({"checker": {"interval_minutes": bad}})
                 self.assertIn("Erlaubt sind", str(ctx.exception))
 
     @unittest.skipUnless(shutil.which("systemd-analyze"), "systemd-analyze nicht vorhanden")
@@ -92,8 +91,7 @@ class InstallScriptTests(unittest.TestCase):
     def test_intervall_aus_konfiguration(self):
         cdir = self.home / ".config" / "truenas-widget"
         cdir.mkdir(parents=True)
-        (cdir / "config.toml").write_text(
-            '[truenas]\nhost = "192.168.1.20"\n[checker]\ninterval_minutes = 30\n')
+        (cdir / "config.toml").write_text('[checker]\ninterval_minutes = 30\n')
         proc = self.run_install()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         timer = (self.home / ".config/systemd/user/truenas-widget.timer").read_text()

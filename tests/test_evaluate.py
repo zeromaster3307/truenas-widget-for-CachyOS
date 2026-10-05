@@ -5,7 +5,7 @@ import unittest
 from truenas_widget import checker
 
 from . import fixtures as fx
-from .helpers import make_cfg
+from .helpers import make_app, make_cfg
 
 
 def status_for(data, denied=()):
@@ -15,7 +15,7 @@ def status_for(data, denied=()):
         if method in denied:
             raw[key] = None
             raw["denied"].append((key, method))
-    return checker.build_status(make_cfg(), raw, now=1_700_000_000)
+    return checker.build_entry(make_cfg(), raw)
 
 
 class EvaluateTests(unittest.TestCase):
@@ -26,9 +26,9 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(st["alerts"], [])
         self.assertEqual(st["app_updates"], [])
         self.assertFalse(st["system_update"]["available"])
-        self.assertEqual(st["system_name"], "Test-NAS")
-        self.assertEqual(st["checked_at_epoch"], 1_700_000_000)
-        self.assertEqual(st["interval_minutes"], 15)  # das Widget braucht das Intervall
+        self.assertEqual(st["name"], "Test-NAS")
+        self.assertEqual(st["id"], "test-nas")
+        self.assertEqual(st["web_url"], "https://127.0.0.1:443/")
 
     def test_app_updates(self):
         st = status_for(fx.scenario(**{"app.query": [
@@ -92,6 +92,7 @@ class EvaluateTests(unittest.TestCase):
         st = status_for(fx.ALL_OK, denied=("alert.list",))
         # "alles ok" kann ohne Alerts nicht bestätigt werden -> grau/offline
         self.assertEqual(st["status"], "offline")
+        self.assertEqual(st["offline_kind"], "incomplete")
         self.assertIn("alerts", st["incomplete"])
         self.assertTrue(any("Zugriff verweigert für alert.list" in p for p in st["problems"]))
 
@@ -101,11 +102,62 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(st["status"], "updates")
         self.assertEqual(st["incomplete"], ["apps"])
 
-    def test_offline_status(self):
-        st = checker.offline_status(make_cfg(), "Nicht erreichbar", now=1)
+    def test_offline_eintrag(self):
+        st = checker.offline_entry(make_cfg(), "unreachable", "Nicht erreichbar")
         self.assertEqual(st["status"], "offline")
+        self.assertEqual(st["offline_kind"], "unreachable")
         self.assertEqual(st["offline_reason"], "Nicht erreichbar")
+
+
+def entry(status="ok", kind=None, count=0, sid="a"):
+    e = checker.system_entry(make_cfg(system_id=sid, name=sid))
+    e["status"], e["offline_kind"], e["offline_count"] = status, kind, count
+    return e
+
+
+class AggregateTests(unittest.TestCase):
+    """Gesamtstatus über mehrere Systeme (Panel-Farbe ohne Widget-Einstellungen)."""
+
+    def test_keine_systeme(self):
+        self.assertEqual(checker.aggregate([]), "offline")
+
+    def test_ein_system_wie_bisher(self):
+        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 5)]), "offline")
+        self.assertEqual(checker.aggregate([entry("offline", "fingerprint", 1)]), "offline")
+        self.assertEqual(checker.aggregate([entry("updates")]), "updates")
+
+    def test_schlimmster_status_zaehlt(self):
+        self.assertEqual(checker.aggregate([entry("ok"), entry("critical", sid="b")]), "critical")
+        self.assertEqual(checker.aggregate([entry("updates"), entry("ok", sid="b")]), "updates")
+
+    def test_einmal_offline_zaehlt_noch_nicht(self):
+        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "unreachable", 1, "b")]), "ok")
+
+    def test_zweimal_offline_ist_warnung(self):
+        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "unreachable", 2, "b")]), "warning")
+        self.assertEqual(checker.aggregate([entry("updates"), entry("offline", "auth", 3, "b")]), "warning")
+
+    def test_kritisch_bleibt_kritisch(self):
+        self.assertEqual(checker.aggregate([entry("critical"), entry("offline", "unreachable", 9, "b")]),
+                         "critical")
+
+    def test_alle_offline_grau(self):
+        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 9),
+                                            entry("offline", "unreachable", 9, "b")]), "offline")
+
+    def test_fingerabdruck_immer_mindestens_warnung(self):
+        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "fingerprint", 1, "b")]), "warning")
+        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 9),
+                                            entry("offline", "fingerprint", 1, "b")]), "warning")
+
+    def test_status_datei_aufbau(self):
+        st = checker.build_status(make_app(), [entry("ok")], now=1_700_000_000)
+        self.assertEqual(st["schema"], 2)
+        self.assertEqual(st["checked_at_epoch"], 1_700_000_000)
         self.assertEqual(st["interval_minutes"], 15)
+        self.assertEqual(st["status"], "ok")
+        self.assertEqual(len(st["systems"]), 1)
+        self.assertIn("Noch kein TrueNAS eingerichtet", checker.build_status(make_app(), [])["reason"])
 
 
 if __name__ == "__main__":

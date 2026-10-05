@@ -8,13 +8,17 @@ from pathlib import Path
 from truenas_widget import checker, notify
 
 from . import fixtures as fx
-from .helpers import make_cfg
+from .helpers import make_app, make_cfg
 
 
-def build(data):
+def entry(data, sid="test-nas", name="Test-NAS"):
     raw = {"alerts": data["alert.list"], "apps": data["app.query"],
            "system": data["update.status"], "denied": []}
-    return checker.build_status(make_cfg(), raw, now=1)
+    return checker.build_entry(make_cfg(system_id=sid, name=name), raw)
+
+
+def build(data, *more_entries):
+    return checker.build_status(make_app(), [entry(data), *more_entries], now=1)
 
 
 class NotifyOnceTests(unittest.TestCase):
@@ -29,8 +33,8 @@ class NotifyOnceTests(unittest.TestCase):
     def sender(self, urgency, title, body):
         self.sent.append((urgency, title, body))
 
-    def run_check(self, data, enabled=True):
-        return notify.process(build(data), self.state, enabled, sender=self.sender)
+    def run_check(self, data, enabled=True, *more_entries):
+        return notify.process(build(data, *more_entries), self.state, enabled, sender=self.sender)
 
     def test_benachrichtigung_nur_einmal(self):
         data = fx.scenario(**{
@@ -66,7 +70,8 @@ class NotifyOnceTests(unittest.TestCase):
     def test_offline_keine_benachrichtigung_und_zustand_bleibt(self):
         self.run_check(fx.scenario(**{"alert.list": [fx.alert("WARNING", uuid="w1")]}))
         before = self.state.read_text()
-        notify.process(checker.offline_status(make_cfg(), "weg"), self.state, True, sender=self.sender)
+        offline = checker.build_status(make_app(), [checker.offline_entry(make_cfg(), "unreachable", "weg")])
+        notify.process(offline, self.state, True, sender=self.sender)
         self.assertEqual(len(self.sent), 1)
         self.assertEqual(self.state.read_text(), before)
         # Nach dem Offline-Intervall: dieselbe Warnung NICHT erneut melden
@@ -77,7 +82,7 @@ class NotifyOnceTests(unittest.TestCase):
         data = fx.scenario(**{"update.status": fx.update_status("25.10.8")})
         self.run_check(data, enabled=False)
         self.assertEqual(self.sent, [])
-        self.assertIn("25.10.8", json.loads(self.state.read_text())["system"])
+        self.assertIn("test-nas:25.10.8", json.loads(self.state.read_text())["system"])
         self.run_check(data, enabled=True)  # beim Wieder-Einschalten kein Nachholen alter Meldungen
         self.assertEqual(self.sent, [])
 
@@ -86,6 +91,26 @@ class NotifyOnceTests(unittest.TestCase):
         self.state.write_text("{kaputt")
         self.run_check(fx.scenario(**{"update.status": fx.update_status("25.10.8")}))
         self.assertEqual(len(self.sent), 1)
+
+
+    def test_zwei_systeme_getrennt_gemerkt(self):
+        upd = fx.scenario(**{"app.query": [fx.app("jellyfin", upgrade=True, latest="1.2.4")]})
+        remote = entry(upd, "remote", "Remote")
+        self.run_check(upd, True, remote)
+        self.assertEqual(len(self.sent), 2)  # gleiche App auf zwei Systemen = zwei Meldungen
+        self.assertEqual({t for _, t, _ in self.sent},
+                         {"Test-NAS: App-Updates verfügbar", "Remote: App-Updates verfügbar"})
+        self.run_check(upd, True, remote)
+        self.assertEqual(len(self.sent), 2)
+
+    def test_offline_system_vergisst_nichts(self):
+        upd = fx.scenario(**{"app.query": [fx.app("jellyfin", upgrade=True, latest="1.2.4")]})
+        self.run_check(upd, True, entry(upd, "remote", "Remote"))
+        self.assertEqual(len(self.sent), 2)
+        down = checker.offline_entry(make_cfg(system_id="remote", name="Remote"), "unreachable", "weg")
+        self.run_check(upd, True, down)          # remote kurz weg
+        self.run_check(upd, True, entry(upd, "remote", "Remote"))  # wieder da
+        self.assertEqual(len(self.sent), 2, "Nach Rückkehr darf nichts erneut gemeldet werden")
 
 
 if __name__ == "__main__":

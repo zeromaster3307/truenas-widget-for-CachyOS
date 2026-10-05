@@ -130,15 +130,20 @@ def section(n, title):
     out(f"[{n}] {title}")
 
 
-def fingerprint_only(cfg_path, host, port, timeout) -> int:
+def fingerprint_only(host, port, system_id, timeout) -> int:
     if not host:
         try:
-            cfg = config_mod.load(cfg_path, require_fingerprint=False)
-            host, port = cfg.host, port or cfg.port
+            app = config_mod.load(require_fingerprint=False)
         except config_mod.ConfigError as exc:
             out(f"FEHLER: {exc}")
-            out("Alternativ Adresse angeben: --host <adresse> --port <port>")
             return 2
+        systems = [x for x in app.systems if system_id in (None, x.id)]
+        if len(systems) != 1:
+            out("Bitte das System angeben: --system <id>  (vorhanden: "
+                + (", ".join(x.id for x in app.systems) or "keins") + ")")
+            out("oder die Adresse direkt: --host <adresse> --port <port>")
+            return 2
+        host, port = systems[0].host, port or systems[0].port
     else:
         try:
             host = config_mod.parse_host(host)
@@ -156,51 +161,45 @@ def fingerprint_only(cfg_path, host, port, timeout) -> int:
     out()
     out("Bitte VOR dem Eintragen vergleichen, z. B. im Browser: TrueNAS-Seite öffnen ->")
     out("Schloss-/Warnsymbol neben der Adresse -> Zertifikat anzeigen -> SHA-256-Fingerabdruck.")
-    out("Erst wenn beide gleich sind, in ~/.config/truenas-widget/config.toml")
-    out("bei fingerprint_sha256 eintragen.")
+    out("Erst wenn beide gleich sind, in ~/.config/truenas-widget/systems/<id>.toml")
+    out("bei fingerprint_sha256 eintragen (oder den Assistenten benutzen).")
     return 0
 
 
-def full(cfg_path) -> int:
+def diagnose_system(cfg) -> int:
+    """Diagnose für EIN System. Gibt die Anzahl der Hinweise zurück."""
     problems = 0
-    out(f"TrueNAS-Widget Diagnose (nur lesend), Version {__version__}")
-    out("Diese Ausgabe enthält KEINE Schlüssel, Adressen oder Werte - nur Feldnamen und Typen.")
-
-    section(1, "Konfiguration")
-    try:
-        cfg = config_mod.load(cfg_path, require_fingerprint=False)
-    except config_mod.ConfigError as exc:
-        out(f"    FEHLER: {exc}")
-        return 2
-    out("    gelesen: ja")
+    out()
+    out("=" * 60)
+    out(f"System '{cfg.id}'")
+    out("=" * 60)
     out(f"    Port: {cfg.port} | API-Pfad: {cfg.ws_path} | Key-Quelle: {cfg.key_source}")
     out(f"    Benutzername eingetragen: {'ja' if cfg.username else 'NEIN'}")
     out(f"    Fingerabdruck eingetragen: {'ja' if cfg.fingerprint else 'NEIN'}")
-    out(f"    Benachrichtigungen: {'an' if cfg.notifications else 'aus'} | Intervall: {cfg.interval_minutes} min")
 
-    section(2, "Erreichbarkeit und Zertifikat")
+    section("2", "Erreichbarkeit und Zertifikat")
     try:
         actual = fetch_fingerprint(cfg.host, cfg.port, cfg.timeout_seconds)
     except ConnectError as exc:
         out(f"    NICHT erreichbar: {exc}")
         out("    -> Gleiches Netz? TrueNAS an? Adresse/Port in der Konfiguration richtig?")
-        return 1
+        return problems + 1
     out("    erreichbar: ja (TLS-Verbindung steht)")
     out(f"    aktueller Fingerabdruck (SHA-256): {config_mod.format_fingerprint(actual)}")
     if not cfg.fingerprint:
         out("    In der Konfiguration ist noch KEIN Fingerabdruck eingetragen.")
         out("    -> Wert oben prüfen (siehe README Abschnitt 4) und eintragen. Danach erneut starten.")
         out("    Abbruch: Ohne bestätigten Fingerabdruck wird der Key nicht gesendet.")
-        return 1
+        return problems + 1
     if actual != cfg.fingerprint:
         out("    Fingerabdruck stimmt NICHT mit der Konfiguration überein!")
         out("    -> Zertifikat erneuert? Dann neuen Wert prüfen und eintragen.")
         out("    -> Sonst: Vorsicht, evtl. gibt sich ein anderes Gerät als TrueNAS aus.")
         out("    Abbruch: Der Key wird NICHT gesendet.")
-        return 1
+        return problems + 1
     out("    Fingerabdruck stimmt mit der Konfiguration überein: ja")
 
-    section(3, "API-Key")
+    section("3", "API-Key")
     if cfg.key_source == "file":
         warnings = keystore.check_permissions(cfg.key_file)
         for w in warnings:
@@ -210,33 +209,33 @@ def full(cfg_path) -> int:
         secret = keystore.load_key(cfg)
     except keystore.KeyError_ as exc:
         out(f"    FEHLER: {exc}")
-        return 2
+        return problems + 1
     out(f"    gelesen: ja (Quelle: {cfg.key_source}, Länge und Inhalt werden nicht angezeigt)")
     if not cfg.username:
         out("    FEHLER: 'username' fehlt in der Konfiguration.")
-        return 2
+        return problems + 1
 
-    section(4, "Anmeldung (auth.login_ex, Mechanismus API_KEY_PLAIN)")
+    section("4", "Anmeldung (auth.login_ex, Mechanismus API_KEY_PLAIN)")
     try:
         ws = WebSocket.connect(cfg.host, cfg.port, cfg.ws_path, cfg.fingerprint, cfg.timeout_seconds)
     except FingerprintMismatch:
         out("    Fingerabdruck hat sich zwischenzeitlich geändert - Abbruch.")
-        return 1
+        return problems + 1
     except ConnectError as exc:
         out(f"    FEHLER beim WebSocket-Aufbau: {secret.redact(str(exc))}")
-        return 1
+        return problems + 1
     with Client(ws) as client:
         try:
             client.login(cfg.username, secret)
         except AuthFailed as exc:
             out(f"    FEHLER: {exc}")
-            return 1
+            return problems + 1
         except (RPCError, ConnectError) as exc:
             out(f"    FEHLER: {secret.redact(str(exc))}")
-            return 1
+            return problems + 1
         out("    Anmeldung: erfolgreich")
 
-        section(5, "Abfragen (nur Feldnamen und Datentypen)")
+        section("5", "Abfragen (nur Feldnamen und Datentypen)")
         results = {}
         for method, params in (
             ("alert.list", []),
@@ -272,7 +271,7 @@ def full(cfg_path) -> int:
             else:
                 out("    alle erwarteten Felder vorhanden: ja")
 
-    section(6, "Auswertung (nur Anzahlen)")
+    section("6", "Auswertung (nur Anzahlen)")
     if "alert.list" in results:
         raw = results["alert.list"] or []
         levels = {}
@@ -293,6 +292,36 @@ def full(cfg_path) -> int:
         if problem:
             out(f"    Hinweis: {secret.redact(problem)}")
 
+    return problems
+
+
+def full(system_id=None, config_path=None, systems_dir=None) -> int:
+    problems = 0
+    out(f"TrueNAS-Widget Diagnose (nur lesend), Version {__version__}")
+    out("Diese Ausgabe enthält KEINE Schlüssel, Adressen oder Werte - nur Feldnamen und Typen.")
+
+    section("1", "Konfiguration")
+    try:
+        app = config_mod.load(config_path, systems_dir, require_fingerprint=False)
+    except config_mod.ConfigError as exc:
+        out(f"    FEHLER: {exc}")
+        return 2
+    out(f"    Benachrichtigungen: {'an' if app.notifications else 'aus'} | Intervall: {app.interval_minutes} min")
+    out(f"    Systeme: {len(app.systems)} gültig, {len(app.broken)} fehlerhaft")
+    for bad_id, msg in app.broken:
+        out(f"    FEHLER in systems/{bad_id}.toml: {msg}")
+        problems += 1
+    systems = [x for x in app.systems if system_id in (None, x.id)]
+    if system_id and not systems:
+        out(f"    FEHLER: kein System mit der Kennung '{system_id}'.")
+        return 2
+    if not app.systems and not app.broken:
+        out("    Noch kein TrueNAS eingerichtet. Assistent: python3 -m truenas_widget.setup")
+        problems += 1
+    for cfg in systems:
+        problems += diagnose_system(cfg)
+
+    out()
     section(7, "Selbsttest Whitelist")
 
     class _NoSend:
@@ -325,13 +354,15 @@ def main(argv=None) -> int:
                    help="nur den Zertifikats-Fingerabdruck anzeigen (sendet nichts)")
     p.add_argument("--host", help="Adresse (nur mit --nur-fingerabdruck)")
     p.add_argument("--port", type=int, help="Port (nur mit --nur-fingerabdruck)")
-    p.add_argument("--config", type=Path, help="anderer Pfad zur config.toml")
+    p.add_argument("--system", help="nur dieses System prüfen (Kennung = Dateiname in systems/)")
+    p.add_argument("--config", type=Path, help=argparse.SUPPRESS)        # für Tests
+    p.add_argument("--systems-dir", type=Path, help=argparse.SUPPRESS)   # für Tests
     args = p.parse_args(argv)
     if args.nur_fingerabdruck:
-        return fingerprint_only(args.config, args.host, args.port, 15.0)
+        return fingerprint_only(args.host, args.port, args.system, 15.0)
     if args.host or args.port:
         p.error("--host/--port nur zusammen mit --nur-fingerabdruck")
-    return full(args.config)
+    return full(args.system, args.config, args.systems_dir)
 
 
 if __name__ == "__main__":

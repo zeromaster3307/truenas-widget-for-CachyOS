@@ -9,17 +9,17 @@ from truenas_widget import config as config_mod
 from .mock_truenas import TEST_KEY
 
 
-def make_cfg(port=5443, fingerprint="ab" * 32, **over):
-    data = {
-        "truenas": {"name": "Test-NAS", "host": "127.0.0.1", "port": port,
-                    "username": "widget-leser", "fingerprint_sha256": fingerprint,
-                    "api_version": "v25.10.0"},
-        "checker": {"timeout_seconds": 5},
-        "notifications": {"enabled": True},
-    }
-    for section, values in over.items():
-        data.setdefault(section, {}).update(values)
-    return config_mod.from_dict(data)
+def make_cfg(port=443, fingerprint="ab" * 32, system_id="test-nas", name="Test-NAS", **over):
+    """Ein geprüftes System (wie aus systems/<id>.toml)."""
+    data = {"name": name, "host": "127.0.0.1", "port": port, "username": "widget-leser",
+            "fingerprint_sha256": fingerprint, "api_version": "v25.10.0", "timeout_seconds": 5}
+    data.update(over)
+    return config_mod.system_from_dict(system_id, data)
+
+
+def make_app(*systems, interval=15, notifications=True):
+    return config_mod.AppConfig(interval_minutes=interval, notifications=notifications,
+                                systems=list(systems))
 
 
 class KeyLeakTestCase(unittest.TestCase):

@@ -3,11 +3,13 @@
 Es werden die üblichen XDG-Verzeichnisse benutzt (wie bei fast allen
 Linux-Programmen). Ist eine XDG-Variable nicht gesetzt, gilt der Standard:
 
-    Konfiguration : ~/.config/truenas-widget/config.toml
-    API-Key-Datei : ~/.config/truenas-widget/api-key
+    Konfiguration : ~/.config/truenas-widget/config.toml      (allgemeine Einstellungen)
+    Systeme       : ~/.config/truenas-widget/systems/<id>.toml (je TrueNAS eine Datei)
+    API-Keys      : ~/.config/truenas-widget/keys/<id>        (je TrueNAS eine Datei, Rechte 600)
     Status-Datei  : ~/.cache/truenas-widget/status.json   (liest das Widget)
-    Zustandsdatei : ~/.local/state/truenas-widget/notified.json
-                    (merkt sich, was schon gemeldet wurde)
+    Zustandsdateien: ~/.local/state/truenas-widget/notified.json
+                    (merkt sich, was schon gemeldet wurde) und offline.json
+                    (wie oft ein System nacheinander nicht erreichbar war)
 """
 
 import os
@@ -31,7 +33,20 @@ def config_file() -> Path:
     return config_dir() / "config.toml"
 
 
-def default_key_file() -> Path:
+def systems_dir() -> Path:
+    return config_dir() / "systems"
+
+
+def keys_dir() -> Path:
+    return config_dir() / "keys"
+
+
+def default_key_file(system_id: str) -> Path:
+    return keys_dir() / system_id
+
+
+def legacy_key_file() -> Path:
+    """Key-Datei aus Version 0.3 (nur für die Umstellung auf 0.4)."""
     return config_dir() / "api-key"
 
 
@@ -49,3 +64,7 @@ def state_dir() -> Path:
 
 def notified_file() -> Path:
     return state_dir() / "notified.json"
+
+
+def offline_file() -> Path:
+    return state_dir() / "offline.json"

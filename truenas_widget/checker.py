@@ -1,20 +1,25 @@
-"""Der Prüfer: fragt TrueNAS ab und schreibt status.json.
+"""Der Prüfer: fragt alle eingerichteten TrueNAS-Systeme ab und schreibt status.json.
 
 Wird vom systemd-User-Timer regelmässig gestartet (Standard: alle 15 Minuten)
 und läuft jeweils einmal durch:
 
-  1. Konfiguration und API-Key lesen.
-  2. Verbindung aufbauen (nur mit passendem Zertifikats-Fingerabdruck).
-  3. Anmelden und drei LESENDE Abfragen machen:
-       alert.list     -> Warnungen/Alarme
-       app.query      -> installierte Apps und ob Updates verfügbar sind
-       update.status  -> ob ein Systemupdate verfügbar ist
-  4. Gesamtstatus bestimmen: ok | updates | warning | critical | offline
-  5. Ergebnis nach ~/.cache/truenas-widget/status.json schreiben (liest das Widget).
-  6. Bei NEUEN Ereignissen eine Desktop-Benachrichtigung schicken.
+  1. Konfiguration lesen (config.toml + systems/*.toml) und je System den API-Key.
+  2. Alle Systeme GLEICHZEITIG prüfen (ein langsames Remote-System hält die
+     anderen nicht auf). Je System:
+       - Verbindung aufbauen (nur mit passendem Zertifikats-Fingerabdruck),
+       - anmelden und drei LESENDE Abfragen machen:
+           alert.list     -> Warnungen/Alarme
+           app.query      -> installierte Apps und ob Updates verfügbar sind
+           update.status  -> ob ein Systemupdate verfügbar ist
+       - Status bestimmen: ok | updates | warning | critical | offline
+  3. Gesamtstatus bestimmen (siehe aggregate()).
+  4. Ergebnis nach ~/.cache/truenas-widget/status.json schreiben (liest das Widget).
+  5. Bei NEUEN Ereignissen eine Desktop-Benachrichtigung schicken.
 
-Nicht erreichbar (anderes Netz, TrueNAS aus, falscher Fingerabdruck)
--> Status "offline", KEIN Alarm, KEINE Benachrichtigung.
+Nicht erreichbar -> dieses System ist "offline", KEINE Benachrichtigung.
+Ein einzelnes System, das offline ist, bleibt grau. Bei mehreren Systemen
+wird ein System, das 2 Prüfungen in Folge fehlt, während ein anderes
+antwortet, als Warnung gezählt (im Widget pro System abschaltbar).
 
 Manuell starten:  python3 -m truenas_widget.checker
 """
@@ -22,10 +27,12 @@ Manuell starten:  python3 -m truenas_widget.checker
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from . import config as config_mod
@@ -35,7 +42,7 @@ from .wsclient import ConnectError, FingerprintMismatch
 
 log = logging.getLogger("truenas_widget")
 
-STATUS_SCHEMA = 1
+STATUS_SCHEMA = 2
 
 # Rangfolge der Gesamtstatus (höher = wichtiger)
 _RANK = {"ok": 0, "updates": 1, "warning": 2, "critical": 3}
@@ -142,19 +149,19 @@ def overall_status(alerts, app_updates, system_update) -> str:
     return status
 
 
-def base_status(cfg, now: float | None = None) -> dict:
-    now = time.time() if now is None else now
+def system_entry(cfg) -> dict:
+    """Leerer Eintrag für ein System in status.json (Standard: offline)."""
     return {
-        "schema": STATUS_SCHEMA,
-        "system_name": cfg.name if cfg else "TrueNAS",
-        "web_url": cfg.web_url if cfg else None,
-        "checked_at": datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds"),
-        "checked_at_epoch": int(now),
-        # Für das Widget: ab wann status.json als "nicht mehr frisch" gilt.
-        "interval_minutes": cfg.interval_minutes if cfg else None,
+        "id": cfg.id,
+        "name": cfg.name,
+        "web_url": cfg.web_url,
         "status": "offline",
         "status_text": STATUS_TEXT["offline"],
+        # Warum offline? unreachable | fingerprint | auth | key | config | incomplete | error
+        "offline_kind": None,
         "offline_reason": None,
+        # Wie viele Prüfungen in Folge das System schon offline war (inkl. dieser)
+        "offline_count": 0,
         "app_updates": [],
         "system_update": {"available": False, "new_version": None},
         "alerts": [],
@@ -163,10 +170,11 @@ def base_status(cfg, now: float | None = None) -> dict:
     }
 
 
-def offline_status(cfg, reason: str, now: float | None = None) -> dict:
-    st = base_status(cfg, now)
-    st["offline_reason"] = reason
-    return st
+def offline_entry(cfg, kind: str, reason: str) -> dict:
+    entry = system_entry(cfg)
+    entry["offline_kind"] = kind
+    entry["offline_reason"] = reason
+    return entry
 
 
 def collect(client: Client) -> dict:
@@ -190,81 +198,184 @@ def collect(client: Client) -> dict:
     return raw
 
 
-def build_status(cfg, raw: dict, now: float | None = None) -> dict:
-    st = base_status(cfg, now)
+def build_entry(cfg, raw: dict) -> dict:
+    entry = system_entry(cfg)
     alerts = evaluate_alerts(raw.get("alerts"))
     apps = evaluate_apps(raw.get("apps"))
     system_update, sys_problem = evaluate_system_update(raw.get("system")) \
         if raw.get("system") is not None else ({"available": False, "new_version": None}, None)
-    st["alerts"], st["app_updates"], st["system_update"] = alerts, apps, system_update
+    entry["alerts"], entry["app_updates"], entry["system_update"] = alerts, apps, system_update
     if sys_problem:
-        st["problems"].append(sys_problem)
+        entry["problems"].append(sys_problem)
     for key, method in raw.get("denied", []):
-        st["incomplete"].append(key)
-        st["problems"].append(
+        entry["incomplete"].append(key)
+        entry["problems"].append(
             f"Zugriff verweigert für {method} - dem TrueNAS-Benutzer fehlt eine Leserolle."
         )
     status = overall_status(alerts, apps, system_update)
-    if status == "ok" and st["incomplete"]:
+    if status == "ok" and entry["incomplete"]:
         # Ohne vollständige Daten können wir "alles in Ordnung" nicht bestätigen.
         status = "offline"
-        st["offline_reason"] = "Daten unvollständig (Zugriff verweigert). Diagnose ausführen."
-    st["status"] = status
-    st["status_text"] = STATUS_TEXT[status]
-    return st
+        entry["offline_kind"] = "incomplete"
+        entry["offline_reason"] = "Daten unvollständig (Zugriff verweigert). Diagnose ausführen."
+    entry["status"] = status
+    entry["status_text"] = STATUS_TEXT[status]
+    return entry
 
 
-def run_once(cfg, secret, connect=Client.connect, now: float | None = None) -> dict:
-    """Eine komplette Prüfung. Gibt immer einen Status zurück (wirft nicht)."""
+def check_system(cfg, secret, connect=Client.connect) -> dict:
+    """Prüft EIN System. Gibt immer einen Eintrag zurück (wirft nicht)."""
+    tag = f"[{cfg.name}]"
     try:
         with connect(cfg) as client:
             client.login(cfg.username, secret)
             raw = collect(client)
-        return build_status(cfg, raw, now)
+        return build_entry(cfg, raw)
     except FingerprintMismatch:
-        log.warning("Zertifikats-Fingerabdruck stimmt nicht überein - Verbindung abgebrochen, Key NICHT gesendet.")
-        return offline_status(
-            cfg,
+        log.warning("%s Zertifikats-Fingerabdruck stimmt nicht überein - Verbindung abgebrochen, "
+                    "Key NICHT gesendet.", tag)
+        return offline_entry(
+            cfg, "fingerprint",
             "Zertifikats-Fingerabdruck stimmt nicht überein. Entweder wurde das Zertifikat "
             "auf dem TrueNAS erneuert (dann neuen Fingerabdruck prüfen und eintragen) oder "
-            "jemand gibt sich als TrueNAS aus. Diagnose ausführen.", now)
+            "jemand gibt sich als TrueNAS aus. Assistent oder Diagnose ausführen.")
     except AuthFailed as exc:
-        log.warning(secret.redact(str(exc)))
-        return offline_status(cfg, secret.redact(str(exc)), now)
+        log.warning("%s %s", tag, secret.redact(str(exc)))
+        return offline_entry(cfg, "auth", secret.redact(str(exc)))
     except MethodNotAllowed as exc:  # Programmierfehler - sollte nie passieren
-        log.error(str(exc))
-        return offline_status(cfg, "Interner Fehler: verbotene Methode verweigert.", now)
+        log.error("%s %s", tag, exc)
+        return offline_entry(cfg, "error", "Interner Fehler: verbotene Methode verweigert.")
     except RPCError as exc:
         msg = secret.redact(str(exc))
-        log.warning("TrueNAS-Fehler: %s", msg)
-        return offline_status(cfg, f"TrueNAS hat mit einem Fehler geantwortet: {msg}", now)
+        log.warning("%s TrueNAS-Fehler: %s", tag, msg)
+        return offline_entry(cfg, "error", f"TrueNAS hat mit einem Fehler geantwortet: {msg}")
     except ConnectError as exc:
-        log.info("Nicht erreichbar: %s", secret.redact(str(exc)))
-        return offline_status(cfg, f"Nicht erreichbar: {secret.redact(str(exc))}", now)
+        log.info("%s Nicht erreichbar: %s", tag, secret.redact(str(exc)))
+        return offline_entry(cfg, "unreachable", f"Nicht erreichbar: {secret.redact(str(exc))}")
     except Exception as exc:  # unerwartet: trotzdem nur "offline", nie abstürzen
-        log.error("Unerwarteter Fehler (%s)", type(exc).__name__)
-        return offline_status(cfg, f"Unerwarteter Fehler ({type(exc).__name__}).", now)
+        log.error("%s Unerwarteter Fehler (%s)", tag, type(exc).__name__)
+        return offline_entry(cfg, "error", f"Unerwarteter Fehler ({type(exc).__name__}).")
 
 
-def write_status(status: dict, secret=None) -> None:
-    public = dict(status)
-    if secret is not None:
-        # Letzte Sicherung: falls der Key irgendwo im Text gelandet wäre.
-        import json
-        text = secret.redact(json.dumps(public, ensure_ascii=False))
-        public = json.loads(text)
+def aggregate(entries: list) -> str:
+    """Gesamtstatus über alle Systeme (gleiche Regel wie im Widget, dort aber
+    zusätzlich mit "offline ignorieren" pro System).
+
+    - Ein System: dessen Status (offline = grau, wie bisher).
+    - Mehrere: schlimmster Status der erreichbaren Systeme. Ein System mit
+      falschem Fingerabdruck zählt immer mindestens als Warnung. Ein sonst
+      offline System zählt als Warnung, wenn es mindestens 2 Prüfungen in Folge
+      fehlte UND ein anderes System erreichbar ist. Sind alle offline: grau.
+    """
+    if not entries:
+        return "offline"
+    if len(entries) == 1:
+        return entries[0]["status"]
+    reachable = [e for e in entries if e["status"] != "offline"]
+    status = "ok" if reachable else "offline"
+    for e in reachable:
+        if _RANK[e["status"]] > _RANK.get(status, -1):
+            status = e["status"]
+    for e in entries:
+        if e["status"] != "offline":
+            continue
+        counts = e.get("offline_kind") == "fingerprint" or (reachable and e.get("offline_count", 0) >= 2)
+        if counts and (status == "offline" or _RANK[status] < _RANK["warning"]):
+            status = "warning"
+    return status
+
+
+def build_status(app, entries: list, now: float | None = None) -> dict:
+    now = time.time() if now is None else now
+    status = aggregate(entries)
+    return {
+        "schema": STATUS_SCHEMA,
+        "checked_at": datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds"),
+        "checked_at_epoch": int(now),
+        # Für das Widget: ab wann status.json als "nicht mehr frisch" gilt.
+        "interval_minutes": app.interval_minutes if app else None,
+        "status": status,
+        "status_text": STATUS_TEXT[status],
+        "reason": None if entries else "Noch kein TrueNAS eingerichtet. Rechtsklick auf das "
+                                       "Widget -> \"TrueNAS hinzufügen/verwalten…\".",
+        "systems": entries,
+    }
+
+
+def update_offline_counts(entries: list, path) -> None:
+    """Zählt pro System, wie oft es nacheinander offline war (Zustandsdatei)."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            old = json.load(fh)
+        if not isinstance(old, dict):
+            old = {}
+    except (OSError, ValueError):
+        old = {}
+    new = {}
+    for e in entries:
+        if e["status"] == "offline":
+            e["offline_count"] = int(old.get(e["id"], 0) or 0) + 1
+            new[e["id"]] = e["offline_count"]
+        else:
+            e["offline_count"] = 0
+    notify.write_json_atomic(path, new)
+
+
+def run_all(app, load_key=None, connect=Client.connect, now: float | None = None,
+            offline_state=None) -> tuple[dict, list]:
+    """Prüft alle Systeme parallel. Gibt (status, geladene Secrets) zurück."""
+    load_key = load_key or keystore.load_key
+    secrets = []
+    jobs = []
+    entries_by_id = {}
+    for system_id, msg in app.broken:
+        cfg = config_mod.SystemConfig(id=system_id, name=system_id, host="-", port=443,
+                                      username="", fingerprint="")
+        entry = offline_entry(cfg, "config", f"Konfigurationsfehler: {msg}")
+        entry["web_url"] = None
+        entries_by_id[system_id] = entry
+        log.error("[%s] Konfiguration: %s", system_id, msg)
+    for cfg in app.systems:
+        try:
+            secret = load_key(cfg)
+        except keystore.KeyError_ as exc:
+            log.error("[%s] API-Key: %s", cfg.name, exc)
+            entries_by_id[cfg.id] = offline_entry(cfg, "key", f"API-Key nicht lesbar: {exc}")
+            continue
+        secrets.append(secret)
+        jobs.append((cfg, secret))
+    if jobs:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+            futures = {cfg.id: pool.submit(check_system, cfg, secret, connect) for cfg, secret in jobs}
+            for system_id, fut in futures.items():
+                entries_by_id[system_id] = fut.result()
+    # Reihenfolge wie die Dateien (alphabetisch nach id)
+    entries = [entries_by_id[k] for k in sorted(entries_by_id)]
+    update_offline_counts(entries, offline_state or paths.offline_file())
+    return build_status(app, entries, now), secrets
+
+
+def redact_all(text: str, secrets) -> str:
+    for s in secrets:
+        text = s.redact(text)
+    return text
+
+
+def write_status(status: dict, secrets=()) -> None:
+    # Letzte Sicherung: falls ein Key irgendwo im Text gelandet wäre.
+    public = json.loads(redact_all(json.dumps(status, ensure_ascii=False), secrets))
     notify.write_json_atomic(paths.status_file(), public)
 
 
 class _RedactFilter(logging.Filter):
-    """Ersetzt den Key in jeder Log-Zeile durch *** (zusätzliche Sicherung)."""
+    """Ersetzt jeden Key in jeder Log-Zeile durch *** (zusätzliche Sicherung)."""
 
-    def __init__(self, secret):
+    def __init__(self, secrets):
         super().__init__()
-        self.secret = secret
+        self.secrets = secrets
 
     def filter(self, record):
-        record.msg = self.secret.redact(record.getMessage())
+        record.msg = redact_all(record.getMessage(), self.secrets)
         record.args = ()
         return True
 
@@ -281,29 +392,30 @@ def setup_logging() -> logging.Handler:
 
 def main(argv=None) -> int:
     handler = setup_logging()
+    secrets: list = []
+    handler.addFilter(_RedactFilter(secrets))
     try:
-        cfg = config_mod.load()
+        app = config_mod.load()
     except config_mod.ConfigError as exc:
         log.error("Konfiguration: %s", exc)
-        write_status(offline_status(None, f"Konfigurationsfehler: {exc}"))
+        status = build_status(None, [], None)
+        status["reason"] = f"Konfigurationsfehler: {exc}"
+        write_status(status)
         return 2
-    try:
-        secret = keystore.load_key(cfg)
-    except keystore.KeyError_ as exc:
-        log.error("API-Key: %s", exc)
-        write_status(offline_status(cfg, f"API-Key nicht lesbar: {exc}"))
-        return 2
-    handler.addFilter(_RedactFilter(secret))
+    if not app.systems and not app.broken:
+        log.info("Noch kein TrueNAS eingerichtet (python3 -m truenas_widget.setup).")
 
-    status = run_once(cfg, secret)
-    write_status(status, secret)
-    if status["status"] == "offline":
-        log.info("Status: offline (%s)", status.get("offline_reason"))
-    else:
-        log.info("Status: %s (%d Alerts, %d App-Updates, Systemupdate: %s)",
-                 status["status"], len(status["alerts"]), len(status["app_updates"]),
-                 "ja" if status["system_update"]["available"] else "nein")
-    notify.process(status, paths.notified_file(), cfg.notifications)
+    status, loaded = run_all(app)
+    secrets.extend(loaded)
+    write_status(status, secrets)
+    for e in status["systems"]:
+        if e["status"] == "offline":
+            log.info("[%s] offline (%s)", e["name"], e.get("offline_reason"))
+        else:
+            log.info("[%s] %s (%d Alerts, %d App-Updates, Systemupdate: %s)",
+                     e["name"], e["status"], len(e["alerts"]), len(e["app_updates"]),
+                     "ja" if e["system_update"]["available"] else "nein")
+    notify.process(status, paths.notified_file(), app.notifications)
     return 0
 
 
