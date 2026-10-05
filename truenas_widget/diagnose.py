@@ -47,7 +47,22 @@ MAX_DEPTH = 4
 MAX_FIELDS = 60
 
 
+# Texte, die nie in der Ausgabe erscheinen dürfen (Adresse, Benutzername des
+# gerade geprüften Systems). Fehlermeldungen aus tieferen Schichten enthalten
+# z. B. "Keine Verbindung zu <host>:<port>" - das wird hier ersetzt.
+_HIDE: list[tuple[str, str]] = []
+
+
+def hide_for(cfg) -> None:
+    pairs = [(f"{cfg.host}:{cfg.port}", "<adresse>:<port>"), (cfg.host, "<adresse>")]
+    if cfg.username:
+        pairs.append((cfg.username, "<benutzer>"))
+    _HIDE[:] = [(a, b) for a, b in pairs if a]
+
+
 def out(text: str = "") -> None:
+    for secret_text, placeholder in _HIDE:
+        text = text.replace(secret_text, placeholder)
     print(text, flush=True)
 
 
@@ -171,6 +186,7 @@ def fingerprint_only(host, port, system_id, timeout) -> int:
 def diagnose_system(cfg) -> int:
     """Diagnose für EIN System. Gibt die Anzahl der Hinweise zurück."""
     problems = 0
+    hide_for(cfg)
     out()
     out("=" * 60)
     out(f"System '{cfg.id}'")

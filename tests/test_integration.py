@@ -171,6 +171,18 @@ class IntegrationTests(KeyLeakTestCase):
         self.assertIn("Zugriff verweigert", out.getvalue())
         self.assertNotIn(TEST_KEY, out.getvalue())
 
+    def test_diagnose_zeigt_keine_adresse_bei_fehler(self):
+        """Fehlermeldungen wie "Keine Verbindung zu <host>:<port>" ohne Adresse ausgeben."""
+        with tempfile.TemporaryDirectory() as tmp:
+            args = self.write_system(tmp, free_port(), self.certs.fingerprint)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = diagnose.main(args)
+        self.assertEqual(rc, 1)
+        self.assertIn("NICHT erreichbar", out.getvalue())
+        self.assertIn("<adresse>:<port>", out.getvalue())
+        self.assertNotIn("127.0.0.1", out.getvalue())
+
     def test_diagnose_fingerabdruck(self):
         with self.server() as srv:
             out = io.StringIO()
