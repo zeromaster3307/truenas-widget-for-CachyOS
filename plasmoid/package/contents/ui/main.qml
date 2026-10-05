@@ -1,13 +1,16 @@
 /*
- * TrueNAS-Status - Plasma-6-Widget
+ * TrueNAS-Status - Plasma-6-Widget (ein oder mehrere TrueNAS-Systeme)
  *
  * Das Widget liest NUR die Datei ~/.cache/truenas-widget/status.json,
  * die der Prüfer (systemd-Timer) schreibt. Es spricht nie selbst mit
- * TrueNAS und kennt den API-Key nicht.
+ * TrueNAS und kennt keinen API-Key. Es startet genau zwei Befehle
+ * (siehe logic.js): die Prüfung und den Einrichtungs-Assistenten.
  *
- * Panel-Ansicht:  farbiger Kreis (grün/gelb/orange/rot/grau) + Tooltip
- * Vollansicht:    Name + Status, darunter nur das Relevante, Fussnote mit Uhrzeit.
- *                 Klick öffnet die TrueNAS-Oberfläche im Browser.
+ * Panel:   farbiger Kreis (grün/gelb/orange/rot/grau) + Tooltip, Klick klappt auf.
+ * Details: je System Punkt + Name + Status, darunter nur das Relevante;
+ *          unten gemeinsam "Letzte Prüfung" und Knopf "Aktualisieren".
+ *          Klick auf ein System öffnet dessen TrueNAS-Oberfläche.
+ * Desktop: zeigt immer direkt die Details.
  */
 import QtQuick
 import QtQuick.Layouts
@@ -25,23 +28,29 @@ PlasmoidItem {
     // Inhalt von status.json (oder null) und daraus abgeleitete Anzeige
     property var st: null
     property double nowMs: Date.now()
-    property var eff: Logic.effective(null, Date.now())
-    property var lines: []
 
-    // Zustand der vom Widget ausgelösten Prüfung (nur beim Start, siehe unten)
+    // "offline ignorieren" pro System (Plasma-Einstellung, siehe config/main.xml)
+    readonly property var ignored: Logic.ignoredMap(Plasmoid.configuration.ignoreOffline)
+    readonly property var eff: Logic.effective(st, nowMs, ignored)
+    readonly property var blocks: Logic.blocks(st, eff)
+    readonly property var globalLines: Logic.linesWithCheckState(Logic.globalLines(st, eff),
+                                                                 checkFailed, notice)
+    // Systeme für die Häkchen im Kontextmenü; nur neu setzen, wenn sich etwas
+    // ändert (sonst würde das Menü jede Minute neu aufgebaut).
+    property var menuSystems: []
+    property string menuSystemsKey: ""
+
+    // Zustand der vom Widget ausgelösten Prüfung
     property bool startupDecided: false   // wurde beim Start schon entschieden?
     property bool checking: false         // "Prüfe…" anzeigen
     property bool checkFailed: false      // "Prüfung fehlgeschlagen" anzeigen
     property double epochBeforeCheck: 0   // checked_at_epoch vor dem Start
     property var triggerExit: null        // Exit-Code des Startbefehls
     property double lastTriggerMs: 0      // zusätzlicher Schutz innerhalb des Widgets
-    property bool manualCheck: false      // wurde die laufende Prüfung per "Jetzt prüfen" gestartet?
+    property bool manualCheck: false      // per "Jetzt prüfen"/"Aktualisieren" gestartet?
     property string notice: ""            // kurzer Hinweis, z. B. "Bitte kurz warten"
 
-    readonly property string systemName: (st && st.system_name) ? st.system_name : "TrueNAS"
     readonly property color statusColor: Logic.color(eff.status)
-    readonly property string headerText: Logic.headerText(eff, checking)
-    readonly property var shownLines: Logic.linesWithCheckState(lines, checkFailed, notice)
 
     // Datei lesen über die Shell (Plasma-"executable"-Datenquelle).
     // ${XDG_CACHE_HOME:-$HOME/.cache} entspricht dem Pfad, den der Prüfer benutzt.
@@ -53,7 +62,7 @@ PlasmoidItem {
                      ? PlasmaCore.Types.NeedsAttentionStatus
                      : PlasmaCore.Types.ActiveStatus
 
-    toolTipMainText: systemName + ": " + headerText
+    toolTipMainText: "TrueNAS: " + Logic.headerText(eff, checking)
     toolTipSubText: (notice ? notice + "\n" : "")
                     + (checkFailed ? "Prüfung fehlgeschlagen.\n" : "")
                     + Logic.tooltip(st, eff) + "\n" + Logic.lastCheckText(st, nowMs)
@@ -72,8 +81,12 @@ PlasmoidItem {
     function applyStatus(parsed) {
         root.nowMs = Date.now();
         root.st = parsed;
-        root.eff = Logic.effective(parsed, root.nowMs);
-        root.lines = Logic.detailLines(parsed, root.eff);
+        var ms = Logic.menuSystems(parsed);
+        var key = JSON.stringify(ms);
+        if (key !== root.menuSystemsKey) {
+            root.menuSystemsKey = key;
+            root.menuSystems = ms;
+        }
 
         if (!root.startupDecided) {
             // Beim Start EINMAL: fehlt die Datei oder ist sie älter als das
@@ -91,7 +104,7 @@ PlasmoidItem {
         }
     }
 
-    // manual = true: per Rechtsklick "Jetzt prüfen" ausgelöst. Es gilt dieselbe
+    // manual = true: per "Jetzt prüfen"/"Aktualisieren" ausgelöst. Es gilt dieselbe
     // Sperre (höchstens einmal pro Minute); bei zu frühem Klick erscheint ein Hinweis.
     function startCheck(manual) {
         if (root.checking) {
@@ -136,28 +149,69 @@ PlasmoidItem {
         noticeTimer.restart();
     }
 
-    // Rechtsklick-Menü des Widgets (Panel und Desktop): "Jetzt prüfen".
-    // Startet dieselbe Prüfung wie beim Widget-Start, also NUR
-    // "systemctl --user start truenas-widget.service" (siehe logic.js).
-    // Belegt im KDE-Quellcode Plasma 6.4 (z. B. kdeplasma-addons, applets/timer):
-    // Plasmoid.contextualActions mit PlasmaCore.Action.
+    function refresh() {
+        reader.connectSource(readCommand);
+    }
+
+    function openUrl(url) {
+        // Nur https-Adressen öffnen (kommen aus status.json bzw. der Konfiguration).
+        if (typeof url === "string" && url.indexOf("https://") === 0) {
+            Qt.openUrlExternally(url);
+        }
+    }
+
+    function openSetup() {
+        setup.connectSource(Logic.setupCommand());
+    }
+
+    function setIgnored(id, on) {
+        Plasmoid.configuration.ignoreOffline =
+            Logic.toggledList(Plasmoid.configuration.ignoreOffline, id, on);
+    }
+
+    // ---------------- Rechtsklick-Menü ----------------
+    // Belegt im KDE-Quellcode Plasma 6.4 (kdeplasma-addons): contextualActions
+    // mit PlasmaCore.Action (applets/timer), checkable (applets/comic),
+    // dynamische Einträge per Instantiator + splice (applets/timer).
     Plasmoid.contextualActions: [
         PlasmaCore.Action {
             text: "Jetzt prüfen"
             icon.name: "view-refresh"
             enabled: !root.checking
             onTriggered: root.startCheck(true)
+        },
+        PlasmaCore.Action {
+            id: separatorSystems
+            isSeparator: true
+        },
+        PlasmaCore.Action {
+            id: separatorSetup
+            isSeparator: true
+        },
+        PlasmaCore.Action {
+            text: "TrueNAS hinzufügen/verwalten…"
+            icon.name: "configure"
+            onTriggered: root.openSetup()
         }
     ]
 
-    function refresh() {
-        reader.connectSource(readCommand);
-    }
-
-    function openWebUi() {
-        // Nur https-Adressen öffnen (kommt aus status.json bzw. der Konfiguration).
-        if (st && typeof st.web_url === "string" && st.web_url.indexOf("https://") === 0) {
-            Qt.openUrlExternally(st.web_url);
+    // Je System ein Häkchen "offline ignorieren" (nur bei mehreren Systemen).
+    // Wirkt nur auf die Farbe des Panel-Icons; die Zeile des Systems zeigt
+    // weiterhin "nicht erreichbar". Falscher Fingerabdruck wird nie ignoriert.
+    Instantiator {
+        model: root.menuSystems
+        delegate: PlasmaCore.Action {
+            required property var modelData
+            text: modelData.name + ": offline ignorieren"
+            checkable: true
+            checked: !!root.ignored[modelData.id]
+            onTriggered: root.setIgnored(modelData.id, this.checked)
+        }
+        onObjectAdded: (index, object) => {
+            Plasmoid.contextualActions.splice(Plasmoid.contextualActions.indexOf(separatorSetup), 0, object)
+        }
+        onObjectRemoved: (index, object) => {
+            Plasmoid.contextualActions.splice(Plasmoid.contextualActions.indexOf(object), 1)
         }
     }
 
@@ -191,6 +245,18 @@ PlasmoidItem {
         }
     }
 
+    // Startet NUR den Einrichtungs-Assistenten (siehe logic.js, setupCommand).
+    // Meldet sich erst, wenn der Assistent geschlossen wurde.
+    P5Support.DataSource {
+        id: setup
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName);
+            root.refresh();
+        }
+    }
+
     // Hinweis "Bitte kurz warten" nach 10 s wieder ausblenden.
     Timer {
         id: noticeTimer
@@ -199,7 +265,7 @@ PlasmoidItem {
         onTriggered: root.notice = ""
     }
 
-    // Läuft die Prüfung zu lange: bisherigen Stand + "Prüfung fehlgeschlagen".
+    // Läuft die Prüfung zu lange: bisheriger Stand + "Prüfung fehlgeschlagen".
     Timer {
         id: checkTimeout
         interval: Logic.CHECK_TIMEOUT_SECONDS * 1000
@@ -256,19 +322,27 @@ PlasmoidItem {
         }
     }
 
-    // ---------------- Vollansicht ----------------
+    // Eine Detailzeile (Überschrift, App, Alert, Hinweis …)
+    component DetailLine: PlasmaComponents3.Label {
+        required property var line
+        Layout.fillWidth: true
+        Layout.topMargin: line.kind === "heading" ? Kirigami.Units.smallSpacing : 0
+        text: (line.kind === "heading" || line.kind === "hint" ? "" : "• ") + line.text
+        font.bold: line.kind === "heading"
+        font.italic: line.kind === "hint" || line.kind === "more"
+        color: line.kind === "alert" ? Logic.color(line.level)
+             : (line.kind === "hint" ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor)
+        wrapMode: Text.Wrap
+        maximumLineCount: line.kind === "alert" ? 2 : 4
+        elide: Text.ElideRight
+    }
+
+    // ---------------- Detailansicht ----------------
     fullRepresentation: Item {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 12
         Layout.preferredWidth: Kirigami.Units.gridUnit * 20
         Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
-
-        // Klick irgendwo öffnet die TrueNAS-Oberfläche
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.openWebUi()
-        }
 
         ColumnLayout {
             id: content
@@ -278,53 +352,76 @@ PlasmoidItem {
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.smallSpacing
 
-            // Zeile 1: Name + Gesamtstatus
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-
-                Rectangle {
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                    radius: width / 2
-                    color: root.statusColor
-                }
-                PlasmaComponents3.Label {
-                    text: root.systemName
-                    font.bold: true
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                }
-                PlasmaComponents3.Label {
-                    text: root.headerText
-                    color: root.statusColor
-                    font.bold: true
+            // Hinweise oben: keine Daten / veraltet / nicht eingerichtet,
+            // "Prüfung fehlgeschlagen", "Bitte kurz warten"
+            Repeater {
+                model: root.globalLines
+                delegate: DetailLine {
+                    required property var modelData
+                    line: modelData
                 }
             }
 
-            // Darunter nur das Relevante (bei "OK" ist diese Liste leer)
+            // Je System ein Block. Klick darauf öffnet dessen Oberfläche.
             Repeater {
-                model: root.shownLines
-                delegate: PlasmaComponents3.Label {
+                model: root.blocks
+                delegate: Item {
+                    id: block
                     required property var modelData
                     Layout.fillWidth: true
-                    Layout.topMargin: modelData.kind === "heading" ? Kirigami.Units.smallSpacing : 0
-                    text: (modelData.kind === "heading" || modelData.kind === "hint" ? "" : "• ")
-                          + modelData.text
-                    font.bold: modelData.kind === "heading"
-                    font.italic: modelData.kind === "hint" || modelData.kind === "more"
-                    color: modelData.kind === "alert" ? Logic.color(modelData.level)
-                         : (modelData.kind === "hint" ? Kirigami.Theme.disabledTextColor
-                                                      : Kirigami.Theme.textColor)
-                    wrapMode: Text.Wrap
-                    maximumLineCount: modelData.kind === "alert" ? 2 : 4
-                    elide: Text.ElideRight
+                    implicitHeight: blockColumn.implicitHeight
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: block.modelData.url ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        onClicked: root.openUrl(block.modelData.url)
+                    }
+
+                    ColumnLayout {
+                        id: blockColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        spacing: Kirigami.Units.smallSpacing
+
+                        // Punkt + Name + Status
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            Rectangle {
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                radius: width / 2
+                                color: block.modelData.color
+                            }
+                            PlasmaComponents3.Label {
+                                text: block.modelData.name
+                                font.bold: true
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            PlasmaComponents3.Label {
+                                text: block.modelData.text
+                                color: block.modelData.color
+                                font.bold: true
+                            }
+                        }
+
+                        // Darunter nur das Relevante (bei "OK" leer), leicht eingerückt
+                        Repeater {
+                            model: block.modelData.lines
+                            delegate: DetailLine {
+                                required property var modelData
+                                line: modelData
+                                Layout.leftMargin: Kirigami.Units.iconSizes.small + Kirigami.Units.smallSpacing
+                            }
+                        }
+                    }
                 }
             }
 
-            // Fussnote: Uhrzeit der letzten Prüfung und Knopf "Aktualisieren"
-            // (auf dem Desktop und im aufgeklappten Panel-Popup gleich).
-            // Zusätzlich bleibt "Jetzt prüfen" im Rechtsklick-Menü.
+            // Gemeinsame Fussnote: letzte Prüfung + "Aktualisieren"
+            // (+ "Einrichten…", solange noch kein System eingerichtet ist)
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.smallSpacing
@@ -332,12 +429,17 @@ PlasmoidItem {
 
                 PlasmaComponents3.Label {
                     Layout.fillWidth: true
-                    text: Logic.lastCheckText(root.st, root.nowMs)
+                    text: Logic.footerText(root.st, root.nowMs, root.checking)
                     font: Kirigami.Theme.smallFont
                     color: Kirigami.Theme.disabledTextColor
                     horizontalAlignment: Text.AlignLeft
                 }
-                // Liegt über der Klickfläche "Browser öffnen" und fängt den Klick selbst ab.
+                PlasmaComponents3.ToolButton {
+                    visible: root.blocks.length === 0 && !root.eff.stale
+                    icon.name: "list-add"
+                    text: "Einrichten…"
+                    onClicked: root.openSetup()
+                }
                 PlasmaComponents3.ToolButton {
                     icon.name: "view-refresh"
                     text: root.checking ? "Prüfe…" : "Aktualisieren"

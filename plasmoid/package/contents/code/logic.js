@@ -2,13 +2,18 @@
 // Anzeige-Logik des Widgets (ohne Oberfläche, daher separat testbar).
 //
 // Das Widget liest NUR die Datei status.json, die der Prüfer schreibt.
-// Es spricht nie selbst mit TrueNAS und kennt den API-Key nicht.
+// Es spricht nie selbst mit TrueNAS und kennt keinen API-Key.
+// Es startet genau zwei Befehle, beide ohne Key und ohne Adresse:
+//   triggerCommand() - die Prüfung (systemctl --user start truenas-widget.service)
+//   setupCommand()   - den Einrichtungs-Assistenten
 
 // Ab diesem Alter gilt status.json als veraltet (dann: grau, "veraltet").
 var STALE_MINUTES = 45;
 
-// Höchstens so viele Alert-Zeilen, danach "+ n weitere".
+// Höchstens so viele Alert-Zeilen, danach "+ n weitere"
+// (pro System; bei mehreren Systemen weniger, damit es übersichtlich bleibt).
 var MAX_ALERT_LINES = 5;
+var MAX_ALERT_LINES_MULTI = 3;
 
 var COLORS = {
     ok: "#2e9d4f",        // grün
@@ -34,27 +39,81 @@ var TEXTS = {
     offline: "Offline"
 };
 
+var RANK = { ok: 0, updates: 1, warning: 2, critical: 3 };
+
 // Liest den Text der Datei. Gibt ein Objekt oder null zurück.
+// Nur das aktuelle Format (schema 2, Liste "systems") wird akzeptiert;
+// eine ältere Datei gilt als "keine Daten" (dann prüft das Widget neu).
 function parseStatus(text) {
     if (!text || !String(text).trim()) {
         return null;
     }
     try {
         var obj = JSON.parse(text);
-        return (obj && typeof obj === "object") ? obj : null;
+        if (!obj || typeof obj !== "object" || !Array.isArray(obj.systems)) {
+            return null;
+        }
+        return obj;
     } catch (e) {
         return null;
     }
 }
 
-// Bestimmt, was angezeigt wird. "nowMs" = aktuelle Zeit in Millisekunden.
+function _isIgnored(ignored, id) {
+    return !!(ignored && ignored[id]);
+}
+
+// Gesamtstatus für Panel-Farbe und Tooltip. Gleiche Regel wie im Prüfer
+// (checker.aggregate), zusätzlich mit "offline ignorieren" pro System:
+//  - Ein System: dessen Status (offline = grau).
+//  - Mehrere: schlimmster Status der erreichbaren Systeme. Falscher
+//    Fingerabdruck zählt immer mindestens als Warnung (nicht ignorierbar).
+//    Ein sonst offline System zählt als Warnung, wenn es mindestens 2
+//    Prüfungen in Folge fehlte, ein anderes erreichbar ist und es NICHT auf
+//    "offline ignorieren" steht. Sind alle offline: grau.
+function aggregate(systems, ignored) {
+    if (!systems || systems.length === 0) {
+        return "offline";
+    }
+    if (systems.length === 1) {
+        return RANK.hasOwnProperty(systems[0].status) ? systems[0].status : "offline";
+    }
+    var reachable = 0;
+    var status = "ok";
+    for (var i = 0; i < systems.length; i++) {
+        var s = systems[i];
+        if (RANK.hasOwnProperty(s.status)) {
+            reachable++;
+            if (RANK[s.status] > RANK[status]) {
+                status = s.status;
+            }
+        }
+    }
+    if (reachable === 0) {
+        status = "offline";
+    }
+    for (var j = 0; j < systems.length; j++) {
+        var o = systems[j];
+        if (RANK.hasOwnProperty(o.status)) {
+            continue;
+        }
+        var counts = o.offline_kind === "fingerprint" ||
+            (reachable > 0 && Number(o.offline_count) >= 2 && !_isIgnored(ignored, o.id));
+        if (counts && (status === "offline" || RANK[status] < RANK.warning)) {
+            status = "warning";
+        }
+    }
+    return status;
+}
+
+// Bestimmt, was insgesamt angezeigt wird. "nowMs" = aktuelle Zeit in ms,
+// "ignored" = { id: true } für Systeme mit "offline ignorieren".
 // Ergebnis: { status, text, reason, stale }
-function effective(st, nowMs) {
+function effective(st, nowMs, ignored) {
     if (!st) {
         return { status: "offline", text: "Offline", stale: false,
                  reason: "Noch keine Daten. Läuft der Prüfer (systemd-Timer)?" };
     }
-    var status = TEXTS.hasOwnProperty(st.status) ? st.status : "offline";
     var epoch = Number(st.checked_at_epoch || 0) * 1000;
     var ageMin = (nowMs - epoch) / 60000;
     if (!epoch || ageMin > STALE_MINUTES) {
@@ -62,8 +121,18 @@ function effective(st, nowMs) {
                  reason: "Letzte Prüfung ist älter als " + STALE_MINUTES +
                          " Minuten (Prüfer läuft nicht oder Rechner war im Ruhezustand)." };
     }
-    return { status: status, text: TEXTS[status], stale: false,
-             reason: status === "offline" ? (st.offline_reason || "Nicht erreichbar.") : "" };
+    var systems = st.systems || [];
+    if (systems.length === 0) {
+        return { status: "offline", text: "Nicht eingerichtet", stale: false,
+                 reason: st.reason || "Noch kein TrueNAS eingerichtet. Rechtsklick → „TrueNAS hinzufügen/verwalten…“." };
+    }
+    var status = aggregate(systems, ignored);
+    var reason = "";
+    if (status === "offline") {
+        reason = systems.length === 1 ? (systems[0].offline_reason || "Nicht erreichbar.")
+                                      : "Kein TrueNAS erreichbar.";
+    }
+    return { status: status, text: TEXTS[status], stale: false, reason: reason };
 }
 
 function color(status) {
@@ -90,20 +159,18 @@ function lastCheckText(st, nowMs) {
     return "Letzte Prüfung: " + text;
 }
 
-// Zeilen für die Vollansicht. Jede Zeile: { kind, text, level }
+// Detailzeilen EINES Systems. Jede Zeile: { kind, text, level }
 // kind: "heading" | "app" | "system" | "alert" | "more" | "hint"
-function detailLines(st, eff) {
+// maxAlerts: bei einem System 5, bei mehreren 3 Alert-Zeilen.
+function systemLines(s, maxAlerts) {
     var lines = [];
-    if (!st || eff.status === "ok") {
+    if (!s || s.status === "ok") {
         return lines;  // alles ok: nur Name + grünes OK, sonst nichts
     }
-    if (eff.status === "offline") {
-        lines.push({ kind: "hint", text: eff.reason, level: "" });
-        if (eff.stale) {
-            return lines;
-        }
+    if (s.status === "offline") {
+        lines.push({ kind: "hint", text: s.offline_reason || "Nicht erreichbar.", level: "" });
     }
-    var apps = st.app_updates || [];
+    var apps = s.app_updates || [];
     if (apps.length > 0) {
         lines.push({ kind: "heading", text: "App-Updates", level: "" });
         for (var i = 0; i < apps.length; i++) {
@@ -112,40 +179,69 @@ function detailLines(st, eff) {
             lines.push({ kind: "app", text: a.name + ": " + a.current + " → " + neu, level: "" });
         }
     }
-    var su = st.system_update || {};
+    var su = s.system_update || {};
     if (su.available) {
         lines.push({ kind: "heading", text: "Systemupdate", level: "" });
         lines.push({ kind: "system", text: "Neue Version: " + (su.new_version || "?"), level: "" });
     }
-    var alerts = st.alerts || [];
+    var alerts = s.alerts || [];
     if (alerts.length > 0) {
         lines.push({ kind: "heading", text: "Warnungen", level: "" });
-        var n = Math.min(alerts.length, MAX_ALERT_LINES);
+        var n = Math.min(alerts.length, maxAlerts);
         for (var j = 0; j < n; j++) {
             lines.push({ kind: "alert", text: alerts[j].level + ": " + alerts[j].text,
                          level: alerts[j].severity || "warning" });
         }
-        if (alerts.length > MAX_ALERT_LINES) {
-            lines.push({ kind: "more", text: "+ " + (alerts.length - MAX_ALERT_LINES) + " weitere", level: "" });
+        if (alerts.length > maxAlerts) {
+            lines.push({ kind: "more", text: "+ " + (alerts.length - maxAlerts) + " weitere", level: "" });
         }
     }
-    var problems = st.problems || [];
+    var problems = s.problems || [];
     for (var k = 0; k < problems.length; k++) {
         lines.push({ kind: "hint", text: problems[k], level: "" });
     }
     return lines;
 }
 
-// Kurzinfo für den Tooltip im Panel.
-function tooltip(st, eff) {
-    if (eff.status === "offline") {
-        return eff.reason;
+// Blöcke für die Vollansicht: je System { id, name, status, text, color, url, lines }.
+// Leer, wenn keine Daten, veraltet oder nichts eingerichtet (dann steht der
+// Grund in globalLines()).
+function blocks(st, eff) {
+    if (!st || eff.stale || !st.systems || st.systems.length === 0) {
+        return [];
     }
-    if (eff.status === "ok") {
-        return "Alles in Ordnung.";
+    var maxAlerts = st.systems.length > 1 ? MAX_ALERT_LINES_MULTI : MAX_ALERT_LINES;
+    var result = [];
+    for (var i = 0; i < st.systems.length; i++) {
+        var s = st.systems[i];
+        var status = RANK.hasOwnProperty(s.status) ? s.status : "offline";
+        result.push({
+            id: s.id, name: s.name || s.id, status: status, text: TEXTS[status],
+            color: color(status),
+            url: (typeof s.web_url === "string" && s.web_url.indexOf("https://") === 0) ? s.web_url : "",
+            lines: systemLines(s, maxAlerts)
+        });
+    }
+    return result;
+}
+
+// Zeilen über den Systemen (keine Daten, veraltet, nicht eingerichtet).
+function globalLines(st, eff) {
+    if (!st || eff.stale || !st.systems || st.systems.length === 0) {
+        return [{ kind: "hint", text: eff.reason, level: "" }];
+    }
+    return [];
+}
+
+function _summary(s) {
+    if (s.status === "offline") {
+        return s.offline_kind === "fingerprint" ? "Fingerabdruck stimmt nicht" : "nicht erreichbar";
+    }
+    if (s.status === "ok") {
+        return "OK";
     }
     var parts = [];
-    var alerts = (st && st.alerts) || [];
+    var alerts = s.alerts || [];
     var crit = 0;
     for (var i = 0; i < alerts.length; i++) {
         if (alerts[i].severity === "critical") {
@@ -158,14 +254,73 @@ function tooltip(st, eff) {
     if (alerts.length - crit > 0) {
         parts.push((alerts.length - crit) + (alerts.length - crit === 1 ? " Warnung" : " Warnungen"));
     }
-    var apps = (st && st.app_updates) || [];
+    var apps = s.app_updates || [];
     if (apps.length > 0) {
         parts.push(apps.length + (apps.length === 1 ? " App-Update" : " App-Updates"));
     }
-    if (st && st.system_update && st.system_update.available) {
-        parts.push("Systemupdate " + (st.system_update.new_version || ""));
+    if (s.system_update && s.system_update.available) {
+        parts.push("Systemupdate " + (s.system_update.new_version || ""));
     }
-    return parts.join(", ");
+    return parts.length ? parts.join(", ") : TEXTS[s.status] || "";
+}
+
+// Kurzinfo für den Tooltip im Panel.
+function tooltip(st, eff) {
+    if (!st || eff.stale || !st.systems || st.systems.length === 0) {
+        return eff.reason;
+    }
+    if (st.systems.length === 1) {
+        var s = st.systems[0];
+        if (s.status === "offline") {
+            return s.offline_reason || "Nicht erreichbar.";
+        }
+        return s.status === "ok" ? "Alles in Ordnung." : _summary(s);
+    }
+    var lines = [];
+    for (var i = 0; i < st.systems.length; i++) {
+        lines.push((st.systems[i].name || st.systems[i].id) + ": " + _summary(st.systems[i]));
+    }
+    return lines.join("\n");
+}
+
+// Systeme für die Häkchen "offline ignorieren" im Kontextmenü
+// (nur bei mehreren Systemen sinnvoll). Ergebnis: [{ id, name }]
+function menuSystems(st) {
+    if (!st || !st.systems || st.systems.length < 2) {
+        return [];
+    }
+    var result = [];
+    for (var i = 0; i < st.systems.length; i++) {
+        result.push({ id: st.systems[i].id, name: st.systems[i].name || st.systems[i].id });
+    }
+    return result;
+}
+
+// Wandelt die gespeicherte Liste (Plasma-Einstellung "ignoreOffline")
+// in { id: true } um, und schaltet ein System um.
+function ignoredMap(list) {
+    var map = {};
+    if (list) {
+        for (var i = 0; i < list.length; i++) {
+            map[String(list[i])] = true;
+        }
+    }
+    return map;
+}
+
+function toggledList(list, id, on) {
+    var result = [];
+    if (list) {
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i]) !== id) {
+                result.push(String(list[i]));
+            }
+        }
+    }
+    if (on) {
+        result.push(id);
+    }
+    return result;
 }
 
 // ------------------------------------------------------------------------
@@ -269,4 +424,22 @@ function linesWithCheckState(lines, failed, notice) {
         extra.push({ kind: "hint", text: "Prüfung fehlgeschlagen – bisheriger Stand wird angezeigt.", level: "" });
     }
     return extra.length ? extra.concat(lines) : lines;
+}
+
+// Fussnote: während der Prüfung "Prüfe…", sonst die Uhrzeit der letzten Prüfung.
+function footerText(st, nowMs, checking) {
+    return checking ? "Prüfe…" : lastCheckText(st, nowMs);
+}
+
+// ------------------------------------------------------------------------
+// Einrichtungs-Assistent starten
+// ------------------------------------------------------------------------
+//
+// SICHERHEIT: startet NUR den von install.sh angelegten Starter
+// ~/.local/share/truenas-widget/setup.sh, ohne Parameter. Der Assistent
+// läuft als eigenes Programm mit eigenen Fenstern; Key und Adressen gibt
+// man dort ein - das Widget sieht davon nichts. Doppelstarts verhindert
+// der Assistent selbst (Sperrdatei).
+function setupCommand() {
+    return 'exec "${XDG_DATA_HOME:-$HOME/.local/share}/truenas-widget/setup.sh"';
 }

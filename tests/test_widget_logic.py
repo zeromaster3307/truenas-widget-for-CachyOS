@@ -7,6 +7,7 @@ alle in logic.js und werden hier geprüft. Ohne Node.js wird übersprungen.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -22,22 +23,41 @@ const ctx = {}; vm.createContext(ctx); vm.runInContext(src, ctx);
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const out = input.map(c => {
   const st = c.text === undefined ? c.st : ctx.parseStatus(c.text);
-  const eff = ctx.effective(st, c.now);
-  return { eff, color: ctx.color(eff.status), lines: ctx.detailLines(st, eff),
-           tooltip: ctx.tooltip(st, eff), last: ctx.lastCheckText(st, c.now) };
+  const eff = ctx.effective(st, c.now, c.ignored || {});
+  const blocks = ctx.blocks(st, eff);
+  return { eff, color: ctx.color(eff.status), blocks, global: ctx.globalLines(st, eff),
+           lines: blocks.length ? blocks[0].lines : [],
+           tooltip: ctx.tooltip(st, eff), last: ctx.lastCheckText(st, c.now),
+           menu: ctx.menuSystems(st) };
 });
 process.stdout.write(JSON.stringify(out));
 """
 
 NOW = 1_700_000_000
+TOP_LEVEL = ("checked_at_epoch", "interval_minutes")
+
+
+def system(status="ok", sid="homelab", **kw):
+    base = {"id": sid, "name": sid, "web_url": f"https://{sid}.invalid/", "status": status,
+            "offline_kind": None, "offline_reason": None, "offline_count": 0,
+            "app_updates": [], "system_update": {"available": False, "new_version": None},
+            "alerts": [], "problems": [], "incomplete": []}
+    base.update(kw)
+    return base
 
 
 def st(status="ok", **kw):
-    base = {"status": status, "system_name": "NAS", "checked_at_epoch": NOW,
-            "app_updates": [], "system_update": {"available": False, "new_version": None},
-            "alerts": [], "problems": [], "offline_reason": None}
-    base.update(kw)
-    return base
+    """status.json (Format 2) mit EINEM System; checked_at_epoch/interval_minutes oben."""
+    top = {k: kw.pop(k) for k in TOP_LEVEL if k in kw}
+    data = {"schema": 2, "checked_at_epoch": NOW, "status": status, "systems": [system(status, **kw)]}
+    data.update(top)
+    return data
+
+
+def multi(*systems, **top):
+    data = {"schema": 2, "checked_at_epoch": NOW, "systems": list(systems)}
+    data.update(top)
+    return data
 
 
 @unittest.skipUnless(shutil.which("node"), "Node.js nicht installiert")
@@ -47,8 +67,8 @@ class WidgetLogicTests(unittest.TestCase):
                               capture_output=True, text=True, check=True)
         return json.loads(proc.stdout)
 
-    def one(self, status_obj, now_offset_min=1, text=None):
-        case = {"now": (NOW + now_offset_min * 60) * 1000}
+    def one(self, status_obj, now_offset_min=1, text=None, ignored=None):
+        case = {"now": (NOW + now_offset_min * 60) * 1000, "ignored": ignored or {}}
         if text is not None:
             case["text"] = text
         else:
@@ -60,6 +80,8 @@ class WidgetLogicTests(unittest.TestCase):
         self.assertEqual(r["eff"]["text"], "OK")
         self.assertEqual(r["color"], "#2e9d4f")
         self.assertEqual(r["lines"], [])
+        self.assertEqual(r["blocks"][0]["name"], "homelab")
+        self.assertEqual(r["blocks"][0]["url"], "https://homelab.invalid/")
 
     def test_farben(self):
         for status, color in (("updates", "#d4a800"), ("warning", "#ef7d00"),
@@ -71,14 +93,23 @@ class WidgetLogicTests(unittest.TestCase):
         r = self.one(st("ok"), now_offset_min=46)
         self.assertEqual(r["eff"]["status"], "offline")
         self.assertEqual(r["eff"]["text"], "Veraltet")
+        self.assertEqual(r["blocks"], [])
+        self.assertIn("älter als 45", r["global"][0]["text"])
 
     def test_keine_datei(self):
         r = self.one(None, text="")
         self.assertEqual(r["eff"]["status"], "offline")
         self.assertIn("Noch keine Daten", r["eff"]["reason"])
 
-    def test_kaputte_datei(self):
+    def test_kaputte_oder_alte_datei(self):
         self.assertEqual(self.one(None, text="{kaputt")["eff"]["status"], "offline")
+        old = json.dumps({"schema": 1, "status": "ok", "checked_at_epoch": NOW})  # Format von 0.3
+        self.assertIn("Noch keine Daten", self.one(None, text=old)["eff"]["reason"])
+
+    def test_nichts_eingerichtet(self):
+        r = self.one(multi())
+        self.assertEqual(r["eff"]["text"], "Nicht eingerichtet")
+        self.assertIn("TrueNAS hinzufügen", r["global"][0]["text"])
 
     def test_updates_zeilen(self):
         r = self.one(st("updates",
@@ -109,8 +140,72 @@ class WidgetLogicTests(unittest.TestCase):
         self.assertTrue(self.one(st("ok"))["last"].startswith("Letzte Prüfung: "))
 
 
-if __name__ == "__main__":
-    unittest.main()
+@unittest.skipUnless(shutil.which("node"), "Node.js nicht installiert")
+class MultiSystemLogicTests(WidgetLogicTests):
+    """Mehrere Systeme: Panel-Farbe, "offline ignorieren", Blöcke, Tooltip, Menü."""
+
+    def remote_offline(self, count, kind="unreachable"):
+        return system("offline", "remote", offline_kind=kind, offline_count=count,
+                      offline_reason="Nicht erreichbar: Zeitüberschreitung")
+
+    def test_einmal_offline_noch_gruen(self):
+        r = self.one(multi(system("ok"), self.remote_offline(1)))
+        self.assertEqual(r["eff"]["status"], "ok")
+
+    def test_zweimal_offline_orange(self):
+        r = self.one(multi(system("ok"), self.remote_offline(2)))
+        self.assertEqual(r["eff"]["status"], "warning")
+        self.assertEqual(r["color"], "#ef7d00")
+
+    def test_offline_ignorieren(self):
+        r = self.one(multi(system("ok"), self.remote_offline(5)), ignored={"remote": True})
+        self.assertEqual(r["eff"]["status"], "ok")
+        # Zeile von remote zeigt trotzdem weiter "nicht erreichbar"
+        remote = r["blocks"][1]
+        self.assertEqual(remote["text"], "Offline")
+        self.assertIn("Nicht erreichbar", remote["lines"][0]["text"])
+
+    def test_fingerabdruck_nie_ignorierbar(self):
+        r = self.one(multi(system("ok"), self.remote_offline(1, "fingerprint")), ignored={"remote": True})
+        self.assertEqual(r["eff"]["status"], "warning")
+
+    def test_alle_offline_grau(self):
+        r = self.one(multi(system("offline", "homelab", offline_kind="unreachable", offline_count=3),
+                           self.remote_offline(3)))
+        self.assertEqual(r["eff"]["status"], "offline")
+        self.assertIn("Kein TrueNAS erreichbar", r["eff"]["reason"])
+
+    def test_kritisch_gewinnt(self):
+        r = self.one(multi(system("critical"), self.remote_offline(9)))
+        self.assertEqual(r["eff"]["status"], "critical")
+
+    def test_bloecke_und_drei_alerts_pro_system(self):
+        alerts = [{"id": str(i), "level": "WARNING", "severity": "warning", "text": f"A{i}"}
+                  for i in range(5)]
+        r = self.one(multi(system("warning", alerts=alerts), system("ok", "remote")))
+        self.assertEqual([b["name"] for b in r["blocks"]], ["homelab", "remote"])
+        lines = r["blocks"][0]["lines"]
+        self.assertEqual(len([l for l in lines if l["kind"] == "alert"]), 3)
+        self.assertEqual(lines[-1]["text"], "+ 2 weitere")
+        self.assertEqual(r["blocks"][1]["lines"], [])
+
+    def test_tooltip_pro_system(self):
+        r = self.one(multi(system("ok"), self.remote_offline(2)))
+        self.assertEqual(r["tooltip"], "homelab: OK\nremote: nicht erreichbar")
+
+    def test_menue_nur_bei_mehreren_systemen(self):
+        self.assertEqual(self.one(st("ok"))["menu"], [])
+        r = self.one(multi(system("ok"), system("ok", "remote")))
+        self.assertEqual(r["menu"], [{"id": "homelab", "name": "homelab"}, {"id": "remote", "name": "remote"}])
+
+    def test_haekchen_liste(self):
+        r = js('toggledList(["a", "b"], "b", false)', 'toggledList(["a"], "b", true)',
+               'toggledList(["a"], "a", true)', 'ignoredMap(["x"])')
+        self.assertEqual(r, [["a"], ["a", "b"], ["a"], {"x": True}])
+
+    def test_fremde_url_wird_nicht_geoeffnet(self):
+        r = self.one(multi(system("ok", web_url="http://homelab.invalid/"), system("ok", "remote")))
+        self.assertEqual(r["blocks"][0]["url"], "")
 
 
 JS_EVAL = r"""
@@ -285,13 +380,25 @@ class ManualCheckQmlTests(unittest.TestCase):
         self.assertIn('text: "Jetzt prüfen"', self.QML)
         self.assertIn("onTriggered: root.startCheck(true)", self.QML)
 
-    def test_widget_startet_nur_den_einen_befehl(self):
+    def test_widget_startet_nur_die_zwei_befehle(self):
         # Ausser in Kommentaren darf "systemctl" nirgends direkt im QML stehen;
-        # gestartet wird ausschliesslich Logic.triggerCommand().
+        # gestartet werden ausschliesslich Logic.triggerCommand() und
+        # Logic.setupCommand(); ansonsten wird nur status.json gelesen.
         code = "\n".join(l for l in self.QML.splitlines() if not l.strip().startswith("//"))
         self.assertNotIn("systemctl", code)
-        self.assertEqual(code.count("trigger.connectSource("), 1)
-        self.assertIn("trigger.connectSource(Logic.triggerCommand())", code)
+        self.assertNotIn("setup.sh", code)
+        sources = re.findall(r"(\w+)\.connectSource\(([^)]*\)?)\)", code)
+        self.assertEqual(sorted(sources), sorted([
+            ("trigger", "Logic.triggerCommand()"),
+            ("setup", "Logic.setupCommand()"),
+            ("reader", "readCommand"),
+        ]))
+        self.assertIn("'cat \"${XDG_CACHE_HOME:-$HOME/.cache}/truenas-widget/status.json\" 2>/dev/null'", code)
+
+    def test_menueeintraege(self):
+        self.assertIn('text: "TrueNAS hinzufügen/verwalten…"', self.QML)
+        self.assertIn('text: modelData.name + ": offline ignorieren"', self.QML)
+        self.assertIn("checkable: true", self.QML)
 
 
 class DesktopViewQmlTests(unittest.TestCase):
@@ -305,9 +412,35 @@ class DesktopViewQmlTests(unittest.TestCase):
         self.assertIn("switchHeight: inPanel ? Number.POSITIVE_INFINITY : 0", self.QML)
 
     def test_aktualisieren_knopf_ueberall_in_der_detailansicht(self):
-        idx = self.QML.index("PlasmaComponents3.ToolButton {")
+        idx = self.QML.rindex("PlasmaComponents3.ToolButton {", 0, self.QML.index('icon.name: "view-refresh"', self.QML.index("Gemeinsame Fussnote")))
         button = self.QML[idx:self.QML.index("}", idx)]
         self.assertNotIn("visible:", button)  # Desktop UND Panel-Popup
         self.assertIn("text: \"Jetzt prüfen\"", self.QML)  # Rechtsklick-Menü bleibt
         self.assertIn("onClicked: root.startCheck(true)", button)  # gleiche Prüfung wie "Jetzt prüfen"
         self.assertIn("enabled: !root.checking", button)
+
+
+@unittest.skipUnless(shutil.which("node"), "Node.js nicht installiert")
+class SetupCommandTests(unittest.TestCase):
+    """Der Assistent wird nur über den Starter von install.sh aufgerufen."""
+
+    def test_befehl(self):
+        cmd = js("setupCommand()")[0]
+        self.assertEqual(cmd, 'exec "${XDG_DATA_HOME:-$HOME/.local/share}/truenas-widget/setup.sh"')
+        for forbidden in ("wss://", "https://", "api-key", "secret-tool", "--"):
+            self.assertNotIn(forbidden, cmd)
+
+    def test_befehl_startet_genau_den_starter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            starter = Path(tmp) / "data" / "truenas-widget" / "setup.sh"
+            starter.parent.mkdir(parents=True)
+            starter.write_text('#!/bin/sh\necho "gestartet:$#"\n')
+            starter.chmod(0o755)
+            proc = subprocess.run(["sh", "-c", js("setupCommand()")[0]],
+                                  env={"XDG_DATA_HOME": str(Path(tmp) / "data"), "PATH": os.environ["PATH"]},
+                                  capture_output=True, text=True)
+        self.assertEqual(proc.stdout.strip(), "gestartet:0")  # ohne Parameter
+
+
+if __name__ == "__main__":
+    unittest.main()
