@@ -9,7 +9,7 @@
         "License": "GPL-3.0-or-later",
         "Name": "TrueNAS-Status",
         "Name[de]": "TrueNAS-Status",
-        "Version": "0.4.1"
+        "Version": "0.5.0"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

@@ -1,5 +1,7 @@
 # TrueNAS-Status-Widget für KDE Plasma 6 (CachyOS)
 
+🇩🇪 Deutsch · 🇬🇧 [English](README.en.md)
+
 Ein kleines Widget für den Plasma-Desktop, das auf einen Blick zeigt, ob auf
 Ihrem TrueNAS – oder mehreren – alles in Ordnung ist, oder ob es
 **App-Updates**, ein **Systemupdate** oder **Warnungen** gibt.
@@ -12,8 +14,7 @@ Ihrem TrueNAS – oder mehreren – alles in Ordnung ist, oder ob es
 | 🔴 rot | kritische Meldung |
 | ⚪ grau | offline / nicht erreichbar / Daten veraltet / noch nicht eingerichtet |
 
-**Version 0.4.1.** Neu gegenüber 0.3: mehrere TrueNAS-Systeme in einem Widget,
-Einrichtungs-Assistent, „offline ignorieren“ pro System.
+**Version 0.5.0** · Lizenz: [GNU GPL v3 oder neuer](LICENSE)
 
 **Annahmen** (bitte prüfen):
 
@@ -198,7 +199,6 @@ cd truenas-widget-for-CachyOS
   den Eintrag **„TrueNAS-Widget einrichten“** im Anwendungsmenü an,
 - legt `~/.config/truenas-widget/` an (Rechte 700) mit `config.toml`
   (allgemeine Einstellungen) – **nur falls noch keine existiert**,
-- stellt eine `config.toml` aus Version 0.3 automatisch um (siehe unten),
 - richtet den systemd-User-Timer ein (`systemctl --user enable --now`) und
   stösst eine erste Prüfung im Hintergrund an,
 - installiert bzw. aktualisiert das Plasma-Widget (`kpackagetool6`).
@@ -260,40 +260,14 @@ Ist schon ein System eingerichtet, zeigt der Assistent ein Menü:
 `<kennung>` bildet der Assistent aus dem Anzeigenamen (z. B. „Mein NAS“ →
 `mein-nas`). Sie bleibt auch beim Umbenennen gleich.
 
-### Update von Version 0.3
-
-Einfach im Repo-Ordner:
-
-```sh
-git pull
-./install.sh
-systemctl --user restart plasma-plasmashell.service
-```
-
-`install.sh` erkennt die alte `config.toml` (Abschnitt `[truenas]`) und
-stellt sie einmalig um:
-
-- Ihr System wird zu `systems/<name>.toml` (z. B. `systems/homelab.toml`).
-- **Die Key-Datei bleibt, wo sie ist** (`~/.config/truenas-widget/api-key`);
-  die neue Systemdatei verweist darauf. Der Key wird dabei nicht gelesen.
-- Die alte Datei bleibt als `config.toml.v0.3.bak` liegen.
-- Bereits gemeldete Ereignisse werden übernommen – es kommen also keine
-  alten Benachrichtigungen erneut.
-
-### Zurück zu Version 0.3 (falls nötig)
-
-Version 0.4 ist **nicht** mit 0.3 kompatibel. Zurück geht es so:
+### Aktualisieren
 
 ```sh
 cd ~/Projekte/Programme/truenas-widget-for-CachyOS
-git checkout 18f0e70                     # letzter Stand von 0.3 (Widget 0.3.1)
-cp ~/.config/truenas-widget/config.toml.v0.3.bak ~/.config/truenas-widget/config.toml
+git pull
 ./install.sh
-systemctl --user restart plasma-plasmashell.service
+systemctl --user restart plasma-plasmashell.service   # nur nötig, wenn sich das Widget geändert hat
 ```
-
-Wieder zurück auf den aktuellen Stand: `git checkout claude/amazing-gauss-ywlz0n`
-und erneut `./install.sh`.
 
 ---
 
@@ -367,6 +341,19 @@ auf dem TrueNAS unter **My API Keys** löschen, im Assistenten
 
 Ohne Assistent: `./diagnose.sh --nur-fingerabdruck --host 192.168.1.20 --port 443`
 zeigt den Wert ebenfalls an (es wird dabei nichts gesendet).
+
+### Vorwarnung, bevor das Zertifikat abläuft
+
+Selbst ausgestellte TrueNAS-Zertifikate laufen irgendwann ab und werden
+erneuert – dann ändert sich der Fingerabdruck. Damit das nicht überraschend
+kommt, liest der Prüfer bei jeder Verbindung das Ablaufdatum mit:
+
+- **Ab 30 Tagen vor Ablauf** steht beim System eine orange Hinweiszeile
+  (auch wenn sonst alles „OK“ ist) und im Tooltip, z. B. „Zertifikat läuft in
+  12 Tagen ab (31.10.2026)“. Die Panel-Farbe ändert sich dadurch **nicht**.
+- Dazu kommt **einmal** eine Desktop-Benachrichtigung – und noch einmal, falls
+  es tatsächlich abläuft.
+- `./diagnose.sh` zeigt „Zertifikat gültig bis“ an.
 
 ### Wenn sich der Fingerabdruck ändert
 
@@ -469,17 +456,27 @@ grau mit der Fehlermeldung.
 
 ### Benachrichtigungen
 
-Wann gibt es eine?
+Wann gibt es eine? Jeweils **einmal** pro System:
 
 - bei einem **neuen** nicht quittierten Alert ab WARNING,
 - bei einem **neuen** App-Update (App + neue Version),
-- bei einem **neuen** Systemupdate (Version).
+- bei einem **neuen** Systemupdate (Version),
+- bei Problemen, **die nicht von selbst verschwinden** und die Sie beheben
+  müssen:
+  - Anmeldung fehlgeschlagen (API-Key abgelaufen oder widerrufen),
+  - API-Key nicht lesbar,
+  - Konfigurationsfehler in einer Systemdatei,
+  - fehlende Rechte (Rolle „Readonly Admin“ fehlt),
+  - Zertifikat läuft bald ab bzw. ist abgelaufen.
+
+  Ist das Problem behoben und tritt später erneut auf, kommt wieder eine
+  Meldung.
 
 Der Titel nennt das System, z. B. „remote: App-Updates verfügbar“.
 Abschalten in `config.toml`: `[notifications] enabled = false`. Der Prüfer
 merkt sich trotzdem, was schon bekannt ist – beim Wieder-Einschalten wird
-nichts „nachgeholt“. Ist ein System nicht erreichbar, gibt es dafür **keine**
-Benachrichtigung.
+nichts „nachgeholt“. „Nicht erreichbar“ und „Fingerabdruck stimmt nicht“
+lösen bewusst **keine** Benachrichtigung aus.
 
 ### Nützliche Befehle
 
@@ -528,7 +525,7 @@ und darf weitergegeben werden.
 | „API-Key nicht lesbar“ | Key-Datei fehlt/leer, oder KWallet gesperrt | Assistent → „API-Key erneuern“ |
 | Warnung „Key-Datei hat zu offene Rechte“ | Andere Benutzer könnten den Key lesen | `chmod 600 <datei>` und `chmod 700 ~/.config/truenas-widget ~/.config/truenas-widget/keys` |
 | „Konfigurationsfehler: …“ bei einem System | Datei in `systems/` von Hand falsch bearbeitet | Meldung lesen; im Assistenten „(fehlerhafte Datei): entfernen“ und neu anlegen |
-| „config.toml hat noch das alte Format“ | Update von 0.3 ohne `install.sh` | `./install.sh` ausführen |
+| Orange Hinweis „Zertifikat läuft in … Tagen ab“ | Zertifikat des TrueNAS läuft bald ab | Kein Handlungsbedarf bis zur Erneuerung. Danach im Assistenten „Zertifikats-Fingerabdruck neu prüfen“ |
 | Grau, „Veraltet“ | Prüfer läuft nicht (oder PC war im Ruhezustand) | `systemctl --user status truenas-widget.timer`, `journalctl --user -u truenas-widget.service -n 30` |
 | Grau, „Noch keine Daten“ | Prüfer lief noch nie (oder status.json noch im alten Format) | „Aktualisieren“ klicken |
 | „Prüfung fehlgeschlagen“ | Nach 150 s keine neuen Daten (Dienst nicht installiert, hängt, Fehler) | `systemctl --user status truenas-widget.service`, `journalctl …`; ggf. `./install.sh` |
@@ -564,7 +561,10 @@ Fingerabdruck nie ignorierbar · **Assistent** (hinzufügen, http abgelehnt,
 Fingerabdruck nicht bestätigt → nichts gesendet, falscher Key, fehlende
 Rechte, KWallet über stdin, entfernen, Key erneuern, Fingerabdruck geändert,
 umbenennen) · nachgebautes kdialog (Key nie in den Programm-Argumenten) ·
-Umstellung von 0.3 · veraltete status.json · max. Alert-Zeilen · Prüfung beim
+Ablaufdatum des Zertifikats (gegen openssl geprüft) und Vorwarnung ·
+einmalige Meldung bei Key abgelaufen, fehlenden Rechten usw. · gemeinsame
+Testfälle für die Panel-Farbe in Prüfer und Widget
+(`tests/aggregate_cases.json`) · veraltete status.json · max. Alert-Zeilen · Prüfung beim
 Widget-Start · höchstens ein Start pro Minute · Widget startet nur die zwei
 erlaubten Befehle · Timer mit `OnCalendar` + `Persistent=true` ·
 `install.sh` in einer Sandbox. Jeder Test prüft, dass der Key in keinem Log
@@ -588,14 +588,16 @@ truenas_widget/        Prüfer und Assistent (Python, nur Standardbibliothek)
   checker.py           Abfragen aller Systeme, Gesamtstatus, status.json
   notify.py            Benachrichtigungen, jedes Ereignis einmal
   setup.py             Einrichtungs-Assistent (kdialog / Terminal)
-  migrate.py           Umstellung von 0.3
   diagnose.py          Diagnose
 plasmoid/package/      Plasma-6-Widget (metadata.json, QML, logic.js, config/main.xml)
 systemd/               Service + Timer (Vorlagen für install.sh)
 tests/                 Unit- und Ende-zu-Ende-Tests mit Attrappe
 install.sh, uninstall.sh, setup.sh, diagnose.sh
+tests/aggregate_cases.json  gemeinsame Testfälle Panel-Farbe (Prüfer + Widget)
 config.example.toml    Beispiel allgemeine Einstellungen
 system.example.toml    Beispiel für ein System (nur Platzhalter)
+LICENSE                GNU GPL v3
+README.md, README.en.md  Anleitung Deutsch / Englisch
 ```
 
 ### Warum keine WebSocket-Bibliothek?
@@ -670,31 +672,35 @@ API-Versionen von v25.10.0 bis v25.10.5 identisch.
 
 ### UNGEPRÜFT – bitte am echten System bestätigen
 
-Bereits auf dem echten System bestätigt (Version 0.3): Verbindung,
-Fingerabdruck, Anmeldung und die drei Abfragen inkl. `select` bei
-`app.query`; Widget im Panel und auf dem Desktop; „Jetzt prüfen“.
+Bereits auf dem echten System bestätigt: Verbindung, Fingerabdruck,
+Anmeldung und die drei Abfragen inkl. `select` bei `app.query`; Widget im
+Panel und auf dem Desktop; „Jetzt prüfen“/„Aktualisieren“; mehrere Systeme
+(LAN + Tailscale); Einrichtungs-Assistent mit kdialog.
 
 Noch offen:
 
 1. **Felder bei echten Updates/Warnungen:** Ob „alt → neu“ bei App-Updates
    (`version → latest_version`) so aussieht wie in der TrueNAS-Oberfläche,
    zeigt sich erst beim ersten echten Update.
-2. **Neu in 0.4, nur mit Attrappen und Tests geprüft:**
-   - der Einrichtungs-Assistent mit dem echten kdialog (Fenster, Texte),
-   - die dynamischen Häkchen „offline ignorieren“ im Rechtsklick-Menü,
-   - das Starten des Assistenten aus dem Widget,
-   - die Detailansicht mit mehreren Systemen.
-3. **Tailscale:** direkte HTTPS-Verbindung zum TrueNAS über die
+2. **Neu in 0.5, nur mit Attrappen und Tests geprüft:** Vorwarnung vor
+   Zertifikatsablauf (zeigt sich erst ~30 Tage vor Ablauf) und die einmaligen
+   Meldungen bei bleibenden Problemen.
+3. **Häkchen „offline ignorieren“** im Rechtsklick-Menü am echten Desktop.
+4. **Tailscale:** direkte HTTPS-Verbindung zum TrueNAS über die
    Tailscale-Adresse (sollte wie im LAN funktionieren). Ungeprüft, wie TrueNAS
    reagiert, wenn ein Proxy (`tailscale serve`) per HTTP weiterreicht – nicht
    empfohlen.
-4. **KWallet als Secret-Service** (Speicherort „KDE-Passwortspeicher“ im
+5. **KWallet als Secret-Service** (Speicherort „KDE-Passwortspeicher“ im
    Assistenten). Ist der Schlüsselbund nach dem Anmelden gesperrt, kann der
    Prüfer den Key nicht lesen – dann die Datei-Variante nehmen.
-5. **Benachrichtigungen** über `notify-send` aus dem systemd-User-Dienst.
-6. **Bezeichnungen in der deutschen TrueNAS-Oberfläche** – hier stehen die
+6. **Benachrichtigungen** über `notify-send` aus dem systemd-User-Dienst.
+7. **Bezeichnungen in der deutschen TrueNAS-Oberfläche** – hier stehen die
    englischen Originalnamen aus dem Quellcode.
 
 ### Lizenz
 
-Noch keine Lizenz festgelegt. Bitte vor einer Veröffentlichung eine wählen.
+Dieses Projekt steht unter der **GNU General Public License, Version 3 oder
+neuer** (GPL-3.0-or-later). Den vollständigen Text finden Sie in
+[LICENSE](LICENSE). Kurz: Sie dürfen es benutzen, ändern und weitergeben;
+wer eine geänderte Fassung weitergibt, muss sie ebenfalls unter der GPL und
+mit Quelltext weitergeben. Es gibt keine Gewährleistung.
