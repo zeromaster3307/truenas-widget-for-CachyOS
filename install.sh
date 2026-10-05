@@ -7,8 +7,7 @@
 #      ~/.local/share/truenas-widget/ und legt einen Eintrag im Anwendungsmenü
 #      an ("TrueNAS-Widget einrichten").
 #   3. Legt ~/.config/truenas-widget/ an (Rechte 700) mit config.toml (allgemeine
-#      Einstellungen), falls noch keine existiert. Eine config.toml im alten
-#      Format (Version 0.3) wird automatisch umgestellt (Sicherung bleibt liegen).
+#      Einstellungen), falls noch keine existiert.
 #   4. Richtet den systemd-User-Timer ein (Intervall aus der Konfiguration).
 #   5. Installiert bzw. aktualisiert das Plasma-6-Widget (kpackagetool6).
 #
@@ -74,13 +73,10 @@ if [ ! -f "$CONFDIR/config.toml" ]; then
     cp "$REPO/config.example.toml" "$CONFDIR/config.toml"
     chmod 600 "$CONFDIR/config.toml"
     say "[3/5] Allgemeine Einstellungen angelegt: $CONFDIR/config.toml"
-elif grep -q '^\[truenas\]' "$CONFDIR/config.toml"; then
-    say "[3/5] Konfiguration im alten Format gefunden - stelle auf mehrere Systeme um:"
-    PYTHONPATH="$APPDIR" "$PYTHON" -m truenas_widget.migrate
 else
     say "[3/5] Vorhandene Konfiguration bleibt unverändert: $CONFDIR/config.toml"
 fi
-for keyfile in "$CONFDIR/api-key" "$CONFDIR"/keys/*; do
+for keyfile in "$CONFDIR"/keys/*; do
     [ -f "$keyfile" ] || continue
     perms=$(stat -c '%a' "$keyfile")
     if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then

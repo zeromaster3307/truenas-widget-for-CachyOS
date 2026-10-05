@@ -285,11 +285,6 @@ def load_system(path: Path, *, require_fingerprint: bool = True) -> SystemConfig
 
 
 def global_from_dict(data: dict) -> AppConfig:
-    if "truenas" in data:
-        raise ConfigError(
-            "config.toml hat noch das alte Format (Abschnitt [truenas], Version 0.3). "
-            "Bitte ./install.sh ausführen - es wandelt die Datei automatisch um."
-        )
     chk = data.get("checker", {})
     notif = data.get("notifications", {})
     for name, sec in (("checker", chk), ("notifications", notif)):

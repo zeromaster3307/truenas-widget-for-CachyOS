@@ -290,13 +290,6 @@ class AssistantTests(KeyLeakTestCase):
         self.assertEqual(cfg.id, "homelab")
         self.assertEqual((paths.keys_dir() / "homelab").read_text().strip(), TEST_KEY)
 
-    def test_altes_format_meldet_install(self):
-        paths.config_dir().mkdir(parents=True)
-        paths.config_file().write_text('[truenas]\nhost = "192.168.1.20"\n')
-        ui = ScriptedUI([("error", None)])
-        self.assertEqual(self.assistant(ui).run(), 2)
-        self.assertIn("install.sh", ui.all_text())
-
 
 class KDialogTests(unittest.TestCase):
     """Echter Aufruf eines nachgebauten kdialog: Argumente und Rückgabe."""

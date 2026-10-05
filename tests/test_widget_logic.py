@@ -103,7 +103,7 @@ class WidgetLogicTests(unittest.TestCase):
 
     def test_kaputte_oder_alte_datei(self):
         self.assertEqual(self.one(None, text="{kaputt")["eff"]["status"], "offline")
-        old = json.dumps({"schema": 1, "status": "ok", "checked_at_epoch": NOW})  # Format von 0.3
+        old = json.dumps({"schema": 1, "status": "ok", "checked_at_epoch": NOW})  # älteres Format
         self.assertIn("Noch keine Daten", self.one(None, text=old)["eff"]["reason"])
 
     def test_nichts_eingerichtet(self):

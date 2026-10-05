@@ -1,4 +1,4 @@
-"""TrueNAS-Status-Widget: nur lesender Prüfer für ein TrueNAS-System.
+"""TrueNAS-Status-Widget: nur lesender Prüfer für ein oder mehrere TrueNAS-Systeme.
 
 Dieses Paket enthält:
 - config.py     : liest und prüft die Konfiguration (config.toml + systems/*.toml)
@@ -9,7 +9,6 @@ Dieses Paket enthält:
 - notify.py     : Desktop-Benachrichtigungen (notify-send), jedes Ereignis nur einmal
 - diagnose.py   : Diagnose-Skript für den Abgleich mit dem echten System
 - setup.py      : Einrichtungs-Assistent (TrueNAS hinzufügen/ändern/entfernen)
-- migrate.py    : einmalige Umstellung der Konfiguration von Version 0.3
 """
 
 __version__ = "0.4.1"

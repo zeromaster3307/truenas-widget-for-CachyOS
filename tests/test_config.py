@@ -148,13 +148,6 @@ class GlobalConfigTests(unittest.TestCase):
         self.assertEqual(app.broken[0][0], "remote")
         self.assertIn("Unsichere Adresse", app.broken[0][1])
 
-    def test_altes_format_wird_erkannt(self):
-        self.cfg.write_text('[truenas]\nhost = "192.168.1.20"\n')
-        with self.assertRaises(c.ConfigError) as ctx:
-            self.load()
-        self.assertIn("altes Format", str(ctx.exception).replace("alte Format", "altes Format"))
-        self.assertIn("install.sh", str(ctx.exception))
-
     def test_beispiel_config_ist_gueltig(self):
         app = c.global_from_dict(tomllib.loads((REPO / "config.example.toml").read_text()))
         self.assertEqual(app.interval_minutes, 15)

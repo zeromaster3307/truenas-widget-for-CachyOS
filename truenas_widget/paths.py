@@ -45,11 +45,6 @@ def default_key_file(system_id: str) -> Path:
     return keys_dir() / system_id
 
 
-def legacy_key_file() -> Path:
-    """Key-Datei aus Version 0.3 (nur für die Umstellung auf 0.4)."""
-    return config_dir() / "api-key"
-
-
 def cache_dir() -> Path:
     return _xdg("XDG_CACHE_HOME", ".cache") / APP_DIR_NAME
 
