@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Beispiel: allgemeine Einstellungen des TrueNAS-Status-Widgets
+# ============================================================
+#
+# Liegt als ~/.config/truenas-widget/config.toml (install.sh legt sie an).
+# Die TrueNAS-Systeme selbst stehen je in einer eigenen Datei unter
+# ~/.config/truenas-widget/systems/ - am einfachsten mit dem Assistenten
+# anlegen (Rechtsklick auf das Widget -> "TrueNAS hinzufügen/verwalten…").
+# Vorlage für eine Systemdatei: system.example.toml
+
+[checker]
+# Abstand zwischen zwei Prüfungen in Minuten.
+# Erlaubt: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440
+# Nach einer Änderung bitte ./install.sh erneut ausführen (stellt den Timer um).
+interval_minutes = 15
+
+[notifications]
+# Desktop-Benachrichtigungen bei neuen Warnungen/Updates (true/false)
+enabled = true

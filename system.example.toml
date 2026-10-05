@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Beispiel: ein TrueNAS-System
+# ============================
+#
+# Normalerweise legt der Einrichtungs-Assistent diese Datei an
+# (Rechtsklick auf das Widget -> "TrueNAS hinzufügen/verwalten…").
+# Von Hand: als ~/.config/truenas-widget/systems/<kennung>.toml speichern,
+# z. B. systems/homelab.toml (Kennung: Kleinbuchstaben, Ziffern, - und _).
+# Alle Werte hier sind PLATZHALTER.
+
+# Anzeigename im Widget (frei wählbar)
+name = "Mein TrueNAS"
+
+# Adresse im LAN (oder per Tailscale). NUR die Adresse, ohne "http://".
+# "http://" oder "ws://" werden abgelehnt: TrueNAS widerruft einen API-Key,
+# wenn er unverschlüsselt gesendet wird.
+host = "192.168.1.20"
+
+# HTTPS-Port der TrueNAS-Weboberfläche
+port = 443
+
+# Benutzer auf dem TrueNAS, dem der API-Key gehört (Rolle "Readonly Admin")
+username = "widget-leser"
+
+# SHA-256-Fingerabdruck des TrueNAS-Zertifikats.
+# Ermitteln: ./diagnose.sh --nur-fingerabdruck --host 192.168.1.20 --port 443
+# Nur nach eigener Prüfung übernehmen (siehe README, Abschnitt 4).
+# Platzhalter - so lange er nicht ersetzt ist, kommt keine Verbindung zustande:
+fingerprint_sha256 = "00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"
+
+# API-Version im Pfad wss://<host>:<port>/api/<api_version>
+api_version = "v25.10.0"
+
+# Wie lange auf dieses TrueNAS gewartet wird (Sekunden).
+# Für Systeme über Tailscale/Internet ggf. etwas mehr.
+timeout_seconds = 20
+
+[key]
+# Woher der API-Key kommt: "file" (Standard) oder "secret-tool" (KWallet/libsecret)
+source = "file"
+
+# Nur bei source = "file": Pfad zur Key-Datei (Rechte 600!).
+# Standard: ~/.config/truenas-widget/keys/<kennung>
+# file = "~/.config/truenas-widget/keys/homelab"
+
+# Nur bei source = "secret-tool": Suchmerkmale für "secret-tool lookup".
+# Standard: service = "truenas-widget", account = "<kennung>"
+# secret_tool_attributes = { service = "truenas-widget", account = "homelab" }
