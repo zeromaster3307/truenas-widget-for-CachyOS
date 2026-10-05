@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Konfiguration lesen und streng prüfen (ab Version 0.4: mehrere Systeme).
+"""Konfiguration lesen und streng prüfen (ein oder mehrere TrueNAS-Systeme).
 
 Aufbau (alles TOML, siehe config.example.toml und system.example.toml im Repo):
 
