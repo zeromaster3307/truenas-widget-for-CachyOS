@@ -29,6 +29,7 @@ import os
 import socket
 import ssl
 import struct
+from datetime import datetime, timezone
 
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024  # Schutz vor riesigen Antworten
@@ -72,9 +73,15 @@ def fetch_fingerprint(host: str, port: int, timeout: float) -> str:
 
     Es wird dabei nichts gesendet (kein Key, keine Anfrage).
     """
+    return fetch_certificate_info(host, port, timeout)[0]
+
+
+def fetch_certificate_info(host: str, port: int, timeout: float) -> tuple[str, datetime | None]:
+    """Wie fetch_fingerprint, liefert zusätzlich "gültig bis" (oder None)."""
     sock = open_tls(host, port, timeout, expected_fingerprint=None)
     try:
-        return _peer_fingerprint(sock)
+        der = sock.getpeercert(binary_form=True) or b""
+        return _peer_fingerprint(sock), cert_not_after(der)
     finally:
         _close_quietly(sock)
 
@@ -84,6 +91,53 @@ def _peer_fingerprint(sock: ssl.SSLSocket) -> str:
     if not der:
         raise ConnectError("Server hat kein Zertifikat geschickt.")
     return hashlib.sha256(der).hexdigest()
+
+
+def _der_item(data: bytes, pos: int) -> tuple[int, int, int]:
+    """Liest ein DER-Element ab pos. Gibt (Tag, Inhalt-Start, Inhalt-Ende) zurück."""
+    tag = data[pos]
+    length = data[pos + 1]
+    pos += 2
+    if length & 0x80:
+        n = length & 0x7F
+        length = int.from_bytes(data[pos:pos + n], "big")
+        pos += n
+    if pos + length > len(data):
+        raise ValueError("DER zu kurz")
+    return tag, pos, pos + length
+
+
+def cert_not_after(der: bytes) -> datetime | None:
+    """Ablaufdatum ("gültig bis") eines Zertifikats im DER-Format, in UTC.
+
+    Python liest dieses Feld nur aus Zertifikaten, die von einer bekannten
+    Stelle bestätigt wurden. Bei selbstsignierten (TrueNAS) muss man es selbst
+    tun. Aufbau laut RFC 5280:
+      Certificate = SEQUENCE { tbsCertificate = SEQUENCE {
+          [0] version (optional), serialNumber, signature, issuer,
+          validity = SEQUENCE { notBefore, notAfter }, ... } ... }
+    Gibt None zurück, wenn etwas nicht passt (dann eben keine Vorwarnung).
+    """
+    try:
+        _, cert_start, _ = _der_item(der, 0)            # Certificate
+        _, tbs_start, _ = _der_item(der, cert_start)    # tbsCertificate
+        tag, _, end = _der_item(der, tbs_start)
+        if tag == 0xA0:                                 # [0] version
+            tag, _, end = _der_item(der, end)           # serialNumber
+        _, _, end = _der_item(der, end)                 # signature
+        _, _, end = _der_item(der, end)                 # issuer
+        _, val_start, _ = _der_item(der, end)           # validity
+        _, _, nb_end = _der_item(der, val_start)        # notBefore
+        tag, start, end = _der_item(der, nb_end)        # notAfter
+        text = der[start:end].decode("ascii")
+        if tag == 0x17:   # UTCTime JJMMTTHHMMSSZ (JJ >= 50 -> 19JJ, sonst 20JJ)
+            yy = int(text[:2])
+            text = ("19" if yy >= 50 else "20") + text
+        elif tag != 0x18:  # GeneralizedTime JJJJMMTTHHMMSSZ
+            return None
+        return datetime.strptime(text, "%Y%m%d%H%M%SZ").replace(tzinfo=timezone.utc)
+    except (ValueError, IndexError, UnicodeDecodeError):
+        return None
 
 
 def _close_quietly(sock) -> None:
@@ -161,6 +215,11 @@ class WebSocket:
         self.sock = sock
         self._buf = b""
         self.closed = False
+        # "Gültig bis" des Server-Zertifikats (für die Vorwarnung), sonst None
+        try:
+            self.cert_not_after = cert_not_after(sock.getpeercert(binary_form=True) or b"")
+        except (AttributeError, OSError, ValueError):
+            self.cert_not_after = None
 
     # ---------- Verbindungsaufbau ----------
     @classmethod

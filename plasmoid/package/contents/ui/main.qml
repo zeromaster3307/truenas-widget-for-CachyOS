@@ -330,7 +330,7 @@ PlasmoidItem {
         text: (line.kind === "heading" || line.kind === "hint" ? "" : "• ") + line.text
         font.bold: line.kind === "heading"
         font.italic: line.kind === "hint" || line.kind === "more"
-        color: line.kind === "alert" ? Logic.color(line.level)
+        color: (line.kind === "alert" || line.kind === "notice") ? Logic.color(line.level)
              : (line.kind === "hint" ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor)
         wrapMode: Text.Wrap
         maximumLineCount: line.kind === "alert" ? 2 : 4

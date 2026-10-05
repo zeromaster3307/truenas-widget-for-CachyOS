@@ -203,6 +203,14 @@ class MultiSystemLogicTests(WidgetLogicTests):
                'toggledList(["a"], "a", true)', 'ignoredMap(["x"])')
         self.assertEqual(r, [["a"], ["a", "b"], ["a"], {"x": True}])
 
+    def test_hinweis_auch_bei_ok(self):
+        r = self.one(multi(system("ok", notices=["Zertifikat läuft in 10 Tagen ab (11.10.2026)."]),
+                           system("ok", "remote")))
+        self.assertEqual(r["eff"]["status"], "ok")               # Farbe bleibt grün
+        line = r["blocks"][0]["lines"][0]
+        self.assertEqual((line["kind"], line["level"]), ("notice", "warning"))
+        self.assertIn("homelab: Zertifikat läuft in 10 Tagen ab", r["tooltip"])
+
     def test_fremde_url_wird_nicht_geoeffnet(self):
         r = self.one(multi(system("ok", web_url="http://homelab.invalid/"), system("ok", "remote")))
         self.assertEqual(r["blocks"][0]["url"], "")

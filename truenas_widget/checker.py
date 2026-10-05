@@ -33,7 +33,7 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import config as config_mod
 from . import keystore, notify, paths
@@ -167,6 +167,11 @@ def system_entry(cfg) -> dict:
         "alerts": [],
         "problems": [],
         "incomplete": [],
+        # Hinweise, die auch bei "OK" angezeigt werden (z. B. Zertifikat läuft bald ab).
+        # Sie ändern die Farbe NICHT.
+        "notices": [],
+        "cert_expires": None,      # Datum JJJJ-MM-TT, bis wann das Zertifikat gilt
+        "cert_days_left": None,
     }
 
 
@@ -223,14 +228,45 @@ def build_entry(cfg, raw: dict) -> dict:
     return entry
 
 
-def check_system(cfg, secret, connect=Client.connect) -> dict:
+# Ab so vielen Tagen vor Ablauf des TrueNAS-Zertifikats erscheint ein Hinweis.
+CERT_WARN_DAYS = 30
+
+
+def apply_cert_expiry(entry: dict, not_after, now: datetime | None = None) -> None:
+    """Trägt das Ablaufdatum des Zertifikats ein und warnt rechtzeitig vorher.
+
+    Wird das Zertifikat auf dem TrueNAS erneuert, ändert sich der Fingerabdruck
+    und die Verbindung wird (gewollt) abgelehnt. Die Vorwarnung erklärt das,
+    bevor es passiert.
+    """
+    if not_after is None:
+        return
+    now = now or datetime.now(timezone.utc)
+    days = (not_after - now).days
+    entry["cert_expires"] = not_after.date().isoformat()
+    entry["cert_days_left"] = days
+    date_text = not_after.strftime("%d.%m.%Y")
+    if days < 0:
+        entry["notices"].append(
+            f"Das Zertifikat dieses TrueNAS ist seit {date_text} abgelaufen. Wird es erneuert, "
+            "im Assistenten \"Zertifikats-Fingerabdruck neu prüfen\" wählen.")
+    elif days <= CERT_WARN_DAYS:
+        entry["notices"].append(
+            f"Zertifikat läuft in {days} Tagen ab ({date_text}). Danach ändert sich vermutlich "
+            "der Fingerabdruck - dann im Assistenten \"Zertifikats-Fingerabdruck neu prüfen\".")
+
+
+def check_system(cfg, secret, connect=Client.connect, now: datetime | None = None) -> dict:
     """Prüft EIN System. Gibt immer einen Eintrag zurück (wirft nicht)."""
     tag = f"[{cfg.name}]"
     try:
         with connect(cfg) as client:
+            not_after = getattr(client.transport, "cert_not_after", None)
             client.login(cfg.username, secret)
             raw = collect(client)
-        return build_entry(cfg, raw)
+        entry = build_entry(cfg, raw)
+        apply_cert_expiry(entry, not_after, now)
+        return entry
     except FingerprintMismatch:
         log.warning("%s Zertifikats-Fingerabdruck stimmt nicht überein - Verbindung abgebrochen, "
                     "Key NICHT gesendet.", tag)

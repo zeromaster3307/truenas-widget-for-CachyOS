@@ -56,6 +56,14 @@ class IntegrationTests(KeyLeakTestCase):
         self.assertEqual(st["status"], "ok", st)
         self.assertEqual(srv.received_methods, ["auth.login_ex", "alert.list", "app.query", "update.status"])
 
+    def test_zertifikat_laeuft_bald_ab(self):
+        # Das Test-Zertifikat gilt nur 1 Tag -> Vorwarnung, Farbe bleibt grün
+        with self.server() as srv:
+            st = checker.check_system(make_cfg(port=srv.port, fingerprint=self.certs.fingerprint), self.secret())
+        self.assertEqual(st["status"], "ok")
+        self.assertIn(st["cert_days_left"], (0, 1))
+        self.assertIn("Zertifikat läuft in", st["notices"][0])
+
     def test_kritisch_end_to_end(self):
         data = fx.scenario(**{"alert.list": [fx.alert("CRITICAL")]})
         with self.server(data) as srv:
@@ -144,6 +152,7 @@ class IntegrationTests(KeyLeakTestCase):
         self.assertEqual(drc, 0, d)
         self.assertIn("Anmeldung: erfolgreich", d)
         self.assertIn("alle erwarteten Felder vorhanden: ja", d)
+        self.assertIn("Zertifikat gültig bis:", d)
         self.assertIn("system.reboot wird verweigert", d)
         self.assertNotIn("127.0.0.1", d)          # keine Adresse in der Diagnose
         self.assertNotIn("widget-leser", d)       # kein Benutzername

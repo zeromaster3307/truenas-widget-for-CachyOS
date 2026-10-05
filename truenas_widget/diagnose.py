@@ -26,14 +26,17 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
 from . import config as config_mod
 from . import keystore
-from .checker import APP_FIELDS, evaluate_alerts, evaluate_apps, evaluate_system_update
+from .checker import (APP_FIELDS, CERT_WARN_DAYS, evaluate_alerts, evaluate_apps,
+                      evaluate_system_update)
 from .rpc import ALLOWED_METHODS, AuthFailed, Client, MethodNotAllowed, RPCError
-from .wsclient import ConnectError, FingerprintMismatch, WebSocket, fetch_fingerprint
+from .wsclient import (ConnectError, FingerprintMismatch, WebSocket, fetch_certificate_info,
+                       fetch_fingerprint)
 
 # Felder, die der Prüfer tatsächlich benutzt - werden gezielt abgeglichen.
 EXPECTED = {
@@ -197,13 +200,19 @@ def diagnose_system(cfg) -> int:
 
     section("2", "Erreichbarkeit und Zertifikat")
     try:
-        actual = fetch_fingerprint(cfg.host, cfg.port, cfg.timeout_seconds)
+        actual, not_after = fetch_certificate_info(cfg.host, cfg.port, cfg.timeout_seconds)
     except ConnectError as exc:
         out(f"    NICHT erreichbar: {exc}")
         out("    -> Gleiches Netz? TrueNAS an? Adresse/Port in der Konfiguration richtig?")
         return problems + 1
     out("    erreichbar: ja (TLS-Verbindung steht)")
     out(f"    aktueller Fingerabdruck (SHA-256): {config_mod.format_fingerprint(actual)}")
+    if not_after is not None:
+        days = (not_after - datetime.now(timezone.utc)).days
+        out(f"    Zertifikat gültig bis: {not_after.strftime('%d.%m.%Y')} (noch {days} Tage)")
+        if days <= CERT_WARN_DAYS:
+            out("    HINWEIS: Zertifikat läuft bald ab bzw. ist abgelaufen - danach ändert sich")
+            out("    vermutlich der Fingerabdruck (Assistent: \"Fingerabdruck neu prüfen\").")
     if not cfg.fingerprint:
         out("    In der Konfiguration ist noch KEIN Fingerabdruck eingetragen.")
         out("    -> Wert oben prüfen (siehe README Abschnitt 4) und eintragen. Danach erneut starten.")

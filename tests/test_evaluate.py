@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from truenas_widget import checker
@@ -117,6 +118,43 @@ def entry(status="ok", kind=None, count=0, sid="a"):
     e = checker.system_entry(make_cfg(system_id=sid, name=sid))
     e["status"], e["offline_kind"], e["offline_count"] = status, kind, count
     return e
+
+
+class CertExpiryNoticeTests(unittest.TestCase):
+    NOW = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+    def entry_for(self, days):
+        e = checker.system_entry(make_cfg())
+        checker.apply_cert_expiry(e, None if days is None else self.NOW + timedelta(days=days, hours=1), self.NOW)
+        return e
+
+    def test_lange_gueltig_kein_hinweis(self):
+        e = self.entry_for(200)
+        self.assertEqual(e["notices"], [])
+        self.assertEqual(e["cert_days_left"], 200)
+        self.assertEqual(e["cert_expires"], "2027-04-19")
+
+    def test_30_tage_vorher_hinweis(self):
+        e = self.entry_for(30)
+        self.assertIn("läuft in 30 Tagen ab (31.10.2026)", e["notices"][0])
+        self.assertIn("Fingerabdruck neu prüfen", e["notices"][0])
+        self.assertEqual(self.entry_for(31)["notices"], [])
+
+    def test_abgelaufen(self):
+        self.assertIn("abgelaufen", self.entry_for(-3)["notices"][0])
+
+    def test_unbekannt(self):
+        e = self.entry_for(None)
+        self.assertEqual((e["notices"], e["cert_expires"]), ([], None))
+
+    def test_farbe_bleibt(self):
+        e = self.entry_for(5)
+        self.assertEqual(e["status"], "offline")  # unverändert (system_entry-Standard)
+        raw = {"alerts": [], "apps": [], "system": fx.update_status(), "denied": []}
+        ok = checker.build_entry(make_cfg(), raw)
+        checker.apply_cert_expiry(ok, self.NOW + timedelta(days=5), self.NOW)
+        self.assertEqual(ok["status"], "ok")
+        self.assertTrue(ok["notices"])
 
 
 class AggregateTests(unittest.TestCase):

@@ -161,12 +161,21 @@ function lastCheckText(st, nowMs) {
 }
 
 // Detailzeilen EINES Systems. Jede Zeile: { kind, text, level }
-// kind: "heading" | "app" | "system" | "alert" | "more" | "hint"
+// kind: "heading" | "app" | "system" | "alert" | "more" | "hint" | "notice"
 // maxAlerts: bei einem System 5, bei mehreren 3 Alert-Zeilen.
+// "notice" (z. B. Zertifikat läuft bald ab) erscheint auch bei "OK",
+// ändert aber nicht die Farbe.
 function systemLines(s, maxAlerts) {
     var lines = [];
-    if (!s || s.status === "ok") {
-        return lines;  // alles ok: nur Name + grünes OK, sonst nichts
+    if (!s) {
+        return lines;
+    }
+    var notices = s.notices || [];
+    for (var n0 = 0; n0 < notices.length; n0++) {
+        lines.push({ kind: "notice", text: notices[n0], level: "warning" });
+    }
+    if (s.status === "ok") {
+        return lines;  // alles ok: nur Name + grünes OK (+ evtl. Hinweis), sonst nichts
     }
     if (s.status === "offline") {
         lines.push({ kind: "hint", text: s.offline_reason || "Nicht erreichbar.", level: "" });
@@ -270,16 +279,25 @@ function tooltip(st, eff) {
     if (!st || eff.stale || !st.systems || st.systems.length === 0) {
         return eff.reason;
     }
+    var lines = [];
     if (st.systems.length === 1) {
         var s = st.systems[0];
         if (s.status === "offline") {
-            return s.offline_reason || "Nicht erreichbar.";
+            lines.push(s.offline_reason || "Nicht erreichbar.");
+        } else {
+            lines.push(s.status === "ok" ? "Alles in Ordnung." : _summary(s));
         }
-        return s.status === "ok" ? "Alles in Ordnung." : _summary(s);
+        lines = lines.concat(s.notices || []);
+        return lines.join("\n");
     }
-    var lines = [];
     for (var i = 0; i < st.systems.length; i++) {
-        lines.push((st.systems[i].name || st.systems[i].id) + ": " + _summary(st.systems[i]));
+        var sys = st.systems[i];
+        var name = sys.name || sys.id;
+        lines.push(name + ": " + _summary(sys));
+        var notes = sys.notices || [];
+        for (var k = 0; k < notes.length; k++) {
+            lines.push(name + ": " + notes[k]);
+        }
     }
     return lines.join("\n");
 }
