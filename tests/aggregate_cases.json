@@ -1,0 +1,318 @@
+{
+  "_comment": "Gemeinsame Testfälle für die Panel-Farbe. Geprüft im Prüfer (checker.aggregate) UND im Widget (logic.js aggregate) - beide müssen gleich entscheiden.",
+  "cases": [
+    {
+      "name": "keine Systeme",
+      "systems": [],
+      "ignored": [],
+      "expected": "offline"
+    },
+    {
+      "name": "ein System ok",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        }
+      ],
+      "ignored": [],
+      "expected": "ok"
+    },
+    {
+      "name": "ein System Updates",
+      "systems": [
+        {
+          "id": "a",
+          "status": "updates",
+          "offline_kind": null,
+          "offline_count": 0
+        }
+      ],
+      "ignored": [],
+      "expected": "updates"
+    },
+    {
+      "name": "ein System offline bleibt grau",
+      "systems": [
+        {
+          "id": "a",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 5
+        }
+      ],
+      "ignored": [],
+      "expected": "offline"
+    },
+    {
+      "name": "ein System falscher Fingerabdruck bleibt grau",
+      "systems": [
+        {
+          "id": "a",
+          "status": "offline",
+          "offline_kind": "fingerprint",
+          "offline_count": 1
+        }
+      ],
+      "ignored": [],
+      "expected": "offline"
+    },
+    {
+      "name": "schlimmster Status zählt",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "critical",
+          "offline_kind": null,
+          "offline_count": 0
+        }
+      ],
+      "ignored": [],
+      "expected": "critical"
+    },
+    {
+      "name": "Updates schlägt OK",
+      "systems": [
+        {
+          "id": "a",
+          "status": "updates",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        }
+      ],
+      "ignored": [],
+      "expected": "updates"
+    },
+    {
+      "name": "einmal offline zählt noch nicht",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 1
+        }
+      ],
+      "ignored": [],
+      "expected": "ok"
+    },
+    {
+      "name": "zweimal offline ist Warnung",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 2
+        }
+      ],
+      "ignored": [],
+      "expected": "warning"
+    },
+    {
+      "name": "Anmeldefehler 3x ist Warnung",
+      "systems": [
+        {
+          "id": "a",
+          "status": "updates",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "auth",
+          "offline_count": 3
+        }
+      ],
+      "ignored": [],
+      "expected": "warning"
+    },
+    {
+      "name": "kritisch bleibt kritisch",
+      "systems": [
+        {
+          "id": "a",
+          "status": "critical",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 9
+        }
+      ],
+      "ignored": [],
+      "expected": "critical"
+    },
+    {
+      "name": "alle offline grau",
+      "systems": [
+        {
+          "id": "a",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 9
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 9
+        }
+      ],
+      "ignored": [],
+      "expected": "offline"
+    },
+    {
+      "name": "Fingerabdruck immer mindestens Warnung",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "fingerprint",
+          "offline_count": 1
+        }
+      ],
+      "ignored": [],
+      "expected": "warning"
+    },
+    {
+      "name": "Fingerabdruck auch wenn alle offline",
+      "systems": [
+        {
+          "id": "a",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 9
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "fingerprint",
+          "offline_count": 1
+        }
+      ],
+      "ignored": [],
+      "expected": "warning"
+    },
+    {
+      "name": "offline ignoriert",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 5
+        }
+      ],
+      "ignored": [
+        "b"
+      ],
+      "expected": "ok"
+    },
+    {
+      "name": "offline ignoriert, Updates zählen weiter",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "updates",
+          "offline_kind": null,
+          "offline_count": 0
+        }
+      ],
+      "ignored": [
+        "b"
+      ],
+      "expected": "updates"
+    },
+    {
+      "name": "Fingerabdruck nie ignorierbar",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "fingerprint",
+          "offline_count": 1
+        }
+      ],
+      "ignored": [
+        "b"
+      ],
+      "expected": "warning"
+    },
+    {
+      "name": "anderes System ignoriert",
+      "systems": [
+        {
+          "id": "a",
+          "status": "ok",
+          "offline_kind": null,
+          "offline_count": 0
+        },
+        {
+          "id": "b",
+          "status": "offline",
+          "offline_kind": "unreachable",
+          "offline_count": 5
+        }
+      ],
+      "ignored": [
+        "a"
+      ],
+      "expected": "warning"
+    }
+  ]
+}

@@ -442,5 +442,18 @@ class SetupCommandTests(unittest.TestCase):
         self.assertEqual(proc.stdout.strip(), "gestartet:0")  # ohne Parameter
 
 
+@unittest.skipUnless(shutil.which("node"), "Node.js nicht installiert")
+class SharedAggregateCasesTests(unittest.TestCase):
+    """Dieselben Fälle wie im Prüfer (tests/aggregate_cases.json)."""
+
+    def test_gemeinsame_faelle(self):
+        cases = json.loads((Path(__file__).parent / "aggregate_cases.json").read_text())["cases"]
+        exprs = [f"aggregate({json.dumps(c['systems'])}, ignoredMap({json.dumps(c['ignored'])}))"
+                 for c in cases]
+        for case, got in zip(cases, js(*exprs)):
+            with self.subTest(case["name"]):
+                self.assertEqual(got, case["expected"])
+
+
 if __name__ == "__main__":
     unittest.main()

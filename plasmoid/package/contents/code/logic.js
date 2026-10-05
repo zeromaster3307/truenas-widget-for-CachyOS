@@ -63,8 +63,9 @@ function _isIgnored(ignored, id) {
     return !!(ignored && ignored[id]);
 }
 
-// Gesamtstatus für Panel-Farbe und Tooltip. Gleiche Regel wie im Prüfer
-// (checker.aggregate), zusätzlich mit "offline ignorieren" pro System:
+// Gesamtstatus für Panel-Farbe und Tooltip. DIESELBE Regel wie im Prüfer
+// (checker.aggregate); beide werden mit denselben Fällen getestet
+// (tests/aggregate_cases.json). Mit "offline ignorieren" pro System:
 //  - Ein System: dessen Status (offline = grau).
 //  - Mehrere: schlimmster Status der erreichbaren Systeme. Falscher
 //    Fingerabdruck zählt immer mindestens als Warnung (nicht ignorierbar).

@@ -1,11 +1,15 @@
 """Tests: Auswertung der Mock-Antworten zum Gesamtstatus."""
 
+import json
 import unittest
+from pathlib import Path
 
 from truenas_widget import checker
 
 from . import fixtures as fx
 from .helpers import make_app, make_cfg
+
+CASES = Path(__file__).parent / "aggregate_cases.json"
 
 
 def status_for(data, denied=()):
@@ -116,39 +120,14 @@ def entry(status="ok", kind=None, count=0, sid="a"):
 
 
 class AggregateTests(unittest.TestCase):
-    """Gesamtstatus über mehrere Systeme (Panel-Farbe ohne Widget-Einstellungen)."""
+    """Gesamtstatus über mehrere Systeme - gemeinsame Fälle mit dem Widget."""
 
-    def test_keine_systeme(self):
-        self.assertEqual(checker.aggregate([]), "offline")
-
-    def test_ein_system_wie_bisher(self):
-        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 5)]), "offline")
-        self.assertEqual(checker.aggregate([entry("offline", "fingerprint", 1)]), "offline")
-        self.assertEqual(checker.aggregate([entry("updates")]), "updates")
-
-    def test_schlimmster_status_zaehlt(self):
-        self.assertEqual(checker.aggregate([entry("ok"), entry("critical", sid="b")]), "critical")
-        self.assertEqual(checker.aggregate([entry("updates"), entry("ok", sid="b")]), "updates")
-
-    def test_einmal_offline_zaehlt_noch_nicht(self):
-        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "unreachable", 1, "b")]), "ok")
-
-    def test_zweimal_offline_ist_warnung(self):
-        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "unreachable", 2, "b")]), "warning")
-        self.assertEqual(checker.aggregate([entry("updates"), entry("offline", "auth", 3, "b")]), "warning")
-
-    def test_kritisch_bleibt_kritisch(self):
-        self.assertEqual(checker.aggregate([entry("critical"), entry("offline", "unreachable", 9, "b")]),
-                         "critical")
-
-    def test_alle_offline_grau(self):
-        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 9),
-                                            entry("offline", "unreachable", 9, "b")]), "offline")
-
-    def test_fingerabdruck_immer_mindestens_warnung(self):
-        self.assertEqual(checker.aggregate([entry("ok"), entry("offline", "fingerprint", 1, "b")]), "warning")
-        self.assertEqual(checker.aggregate([entry("offline", "unreachable", 9),
-                                            entry("offline", "fingerprint", 1, "b")]), "warning")
+    def test_gemeinsame_faelle(self):
+        cases = json.loads(CASES.read_text())["cases"]
+        self.assertGreater(len(cases), 10)
+        for case in cases:
+            with self.subTest(case["name"]):
+                self.assertEqual(checker.aggregate(case["systems"], set(case["ignored"])), case["expected"])
 
     def test_status_datei_aufbau(self):
         st = checker.build_status(make_app(), [entry("ok")], now=1_700_000_000)

@@ -257,9 +257,13 @@ def check_system(cfg, secret, connect=Client.connect) -> dict:
         return offline_entry(cfg, "error", f"Unerwarteter Fehler ({type(exc).__name__}).")
 
 
-def aggregate(entries: list) -> str:
-    """Gesamtstatus über alle Systeme (gleiche Regel wie im Widget, dort aber
-    zusätzlich mit "offline ignorieren" pro System).
+def aggregate(entries: list, ignored=()) -> str:
+    """Gesamtstatus über alle Systeme.
+
+    DIESELBE Regel steht im Widget (plasmoid/.../logic.js, aggregate). Beide
+    werden mit denselben Fällen getestet: tests/aggregate_cases.json.
+    "ignored" = Kennungen mit "offline ignorieren" (stellt nur das Widget ein;
+    der Prüfer selbst übergibt nichts).
 
     - Ein System: dessen Status (offline = grau, wie bisher).
     - Mehrere: schlimmster Status der erreichbaren Systeme. Ein System mit
@@ -279,7 +283,8 @@ def aggregate(entries: list) -> str:
     for e in entries:
         if e["status"] != "offline":
             continue
-        counts = e.get("offline_kind") == "fingerprint" or (reachable and e.get("offline_count", 0) >= 2)
+        counts = e.get("offline_kind") == "fingerprint" or (
+            reachable and e.get("offline_count", 0) >= 2 and e["id"] not in ignored)
         if counts and (status == "offline" or _RANK[status] < _RANK["warning"]):
             status = "warning"
     return status
