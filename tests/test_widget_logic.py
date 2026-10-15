@@ -97,6 +97,15 @@ class WidgetLogicTests(unittest.TestCase):
         self.assertEqual(r["blocks"], [])
         self.assertIn("älter als 45", r["global"][0]["text"])
 
+    def test_veraltet_richtet_sich_nach_intervall(self):
+        # 60 Minuten Intervall: erst nach 2 x 60 + 15 = 135 Minuten veraltet
+        self.assertEqual(self.one(st("ok", interval_minutes=60), now_offset_min=134)["eff"]["status"], "ok")
+        r = self.one(st("ok", interval_minutes=60), now_offset_min=136)
+        self.assertEqual(r["eff"]["text"], "Veraltet")
+        self.assertIn("älter als 135", r["global"][0]["text"])
+        # kurzes Intervall: nie unter 45 Minuten
+        self.assertEqual(self.one(st("ok", interval_minutes=5), now_offset_min=44)["eff"]["status"], "ok")
+
     def test_keine_datei(self):
         r = self.one(None, text="")
         self.assertEqual(r["eff"]["status"], "offline")

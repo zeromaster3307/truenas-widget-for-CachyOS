@@ -8,8 +8,16 @@
 //   triggerCommand() - die Prüfung (systemctl --user start truenas-widget.service)
 //   setupCommand()   - den Einrichtungs-Assistenten
 
-// Ab diesem Alter gilt status.json als veraltet (dann: grau, "veraltet").
+// Ab diesem Alter gilt status.json als veraltet (dann: grau, "veraltet"):
+// zwei verpasste Prüfungen plus 15 Minuten Reserve, aber nie unter 45 Minuten
+// (bei 15 Minuten Intervall also genau 45).
 var STALE_MINUTES = 45;
+var STALE_RESERVE_MINUTES = 15;
+
+function staleMinutes(st) {
+    var interval = Number(st && st.interval_minutes) > 0 ? Number(st.interval_minutes) : DEFAULT_INTERVAL_MINUTES;
+    return Math.max(STALE_MINUTES, interval * 2 + STALE_RESERVE_MINUTES);
+}
 
 // Höchstens so viele Alert-Zeilen, danach "+ n weitere"
 // (pro System; bei mehreren Systemen weniger, damit es übersichtlich bleibt).
@@ -118,9 +126,10 @@ function effective(st, nowMs, ignored) {
     }
     var epoch = Number(st.checked_at_epoch || 0) * 1000;
     var ageMin = (nowMs - epoch) / 60000;
-    if (!epoch || ageMin > STALE_MINUTES) {
+    var staleMin = staleMinutes(st);
+    if (!epoch || ageMin > staleMin) {
         return { status: "offline", text: "Veraltet", stale: true,
-                 reason: "Letzte Prüfung ist älter als " + STALE_MINUTES +
+                 reason: "Letzte Prüfung ist älter als " + staleMin +
                          " Minuten (Prüfer läuft nicht oder Rechner war im Ruhezustand)." };
     }
     var systems = st.systems || [];

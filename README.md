@@ -77,7 +77,9 @@ Das Projekt besteht aus vier Teilen:
      „+ n weitere“). Ganz unten gemeinsam **„Letzte Prüfung: hh:mm“** und der
      Knopf **„Aktualisieren“**.
    - Ein Klick auf ein System öffnet **dessen** TrueNAS-Oberfläche im Browser.
-   - Ist die Datei älter als 45 Minuten, zeigt das Widget grau „Veraltet“.
+   - Ist die Datei älter als zwei Prüfintervalle plus 15 Minuten (mindestens
+     45 Minuten, beim Standard von 15 Minuten also genau 45), zeigt das Widget
+     grau „Veraltet“.
    - **Beim Start** (z. B. nach dem Anmelden) prüft das Widget, ob die Daten
      älter als das Prüfintervall sind, und stösst dann **einmal** eine
      Prüfung an.

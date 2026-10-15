@@ -82,8 +82,9 @@ The project consists of four parts:
      bottom, shared: **"Letzte Prüfung: hh:mm"** (last check) and the button
      **"Aktualisieren"** (refresh).
    - Clicking a system opens **its** TrueNAS web UI in the browser.
-   - If the file is older than 45 minutes, the widget shows grey "Veraltet"
-     (outdated).
+   - If the file is older than two check intervals plus 15 minutes (at least
+     45 minutes, so exactly 45 with the default of 15 minutes), the widget
+     shows grey "Veraltet" (outdated).
    - **On start** (e.g. after login) the widget checks whether the data is
      older than the check interval and then triggers **one** check.
    - **Right-click menu:** "Jetzt prüfen" (check now), with several systems

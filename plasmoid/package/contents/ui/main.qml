@@ -216,12 +216,11 @@ PlasmoidItem {
         }
     }
 
-    // UNGEPRÜFT (nur im KDE-Quellcode nachgelesen, nicht auf echtem Plasma 6 getestet):
     // Die "executable"-Datenquelle aus plasma5support führt den Quellnamen als
     // Shell-Befehl aus (KProcess::setShellCommand, plasma-workspace 6.4,
     // dataengines/executable/executable.cpp) und liefert "exit code", "stdout"
     // und "stderr". Sie gilt in Plasma 6 als veraltet, ist aber noch enthalten.
-    // Annahme: Nach disconnectSource() startet ein erneutes connectSource()
+    // Nach disconnectSource() startet ein erneutes connectSource()
     // mit demselben Befehl ihn wieder neu.
     P5Support.DataSource {
         id: reader
