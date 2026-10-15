@@ -14,7 +14,7 @@ Ihrem TrueNAS – oder mehreren – alles in Ordnung ist, oder ob es
 | 🔴 rot | kritische Meldung |
 | ⚪ grau | offline / nicht erreichbar / Daten veraltet / noch nicht eingerichtet |
 
-**Version 0.5.0** · Lizenz: [GNU GPL v3 oder neuer](LICENSE)
+**Version 0.5.1** · Lizenz: [GNU GPL v3 oder neuer](LICENSE)
 
 **Annahmen** (bitte prüfen):
 

@@ -17,7 +17,7 @@ are **app updates**, a **system update** or **alerts**.
 | 🔴 red | critical alert |
 | ⚪ grey | offline / unreachable / data outdated / not set up yet |
 
-**Version 0.5.0** · Licence: [GNU GPL v3 or later](LICENSE)
+**Version 0.5.1** · Licence: [GNU GPL v3 or later](LICENSE)
 
 **Assumptions** (please check):
 
