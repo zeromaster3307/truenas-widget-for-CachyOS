@@ -344,6 +344,9 @@ PlasmoidItem {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 20
         Layout.minimumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
         Layout.preferredHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
+        // Plasma merkt sich die Popup-Grösse (popupHeight) und nimmt sie statt
+        // der Wunschhöhe; die Obergrenze hält das Popup so hoch wie den Inhalt.
+        Layout.maximumHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
 
         ColumnLayout {
             id: content
